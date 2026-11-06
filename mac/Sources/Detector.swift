@@ -23,6 +23,7 @@ final class LevelDetector {
     struct Sample {
         var db: Double
         var speech: Double?   // short-term speech level when speaking, else nil
+        var noise: Double = -100
     }
 
     // Tunables
@@ -164,7 +165,7 @@ final class LevelDetector {
             baselineNoiseFloor = ema(nb, noiseFloor, dt: dt, tau: 120)
         }
 
-        history.append(Sample(db: db, speech: isSpeech ? shortTerm : nil))
+        history.append(Sample(db: db, speech: isSpeech ? shortTerm : nil, noise: noiseFloor))
         if history.count > historyLength { history.removeFirst(history.count - historyLength) }
     }
 }

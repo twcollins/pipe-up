@@ -1,8 +1,9 @@
 import AppKit
 
 /// Last ~60 s of mic activity, shown at the top of the menu.
-///  grey bars   = raw level
-///  blue line   = your speaking level (short-term)
+///  faint bars  = raw level
+///  blue bands  = spread of your speech level (middle 50% darker, 10–90% lighter)
+///  blue line   = trend (median speech level)
 ///  dashed line = your normal level (baseline)
 ///  orange line = the "level dropped" threshold
 final class GraphView: NSView {
@@ -43,30 +44,67 @@ final class GraphView: NSView {
         let step = r.width / CGFloat(n)
         let offset = n - hist.count
 
-        // Raw level bars.
-        NSColor.tertiaryLabelColor.setFill()
+        // Faint raw level so the graph still feels live.
+        NSColor.tertiaryLabelColor.withAlphaComponent(0.10).setFill()
         for (i, s) in hist.enumerated() {
             let x = r.minX + CGFloat(i + offset) * step
-            let top = y(s.db, in: r)
-            NSRect(x: x, y: r.minY, width: max(step, 1), height: top - r.minY).fill()
+            NSRect(x: x, y: r.minY, width: max(step, 1), height: y(s.db, in: r) - r.minY).fill()
         }
 
-        // Speaking level line.
-        let line = NSBezierPath()
-        line.lineWidth = 1.8
-        var drawing = false
-        for (i, s) in hist.enumerated() {
-            let x = r.minX + CGFloat(i + offset) * step
-            if let sp = s.speech {
-                let p = NSPoint(x: x, y: y(sp, in: r))
-                drawing ? line.line(to: p) : line.move(to: p)
-                drawing = true
-            } else {
-                drawing = false
+        // Smoothed view: for each 2 px column, the spread of speech levels in a
+        // ~2.5 s window around it (band) and its median (trend).
+        struct Col { var x: CGFloat; var lo: Double?; var q1: Double?; var med: Double?; var q3: Double?; var hi: Double?; var noise: Double? }
+        let colCount = max(1, Int(r.width / 2))
+        let half = 15   // frames either side (~1.3 s)
+        var cols: [Col] = []
+        for c in 0..<colCount {
+            let frameIdx = Int((Double(c) + 0.5) / Double(colCount) * Double(n)) - offset
+            var col = Col(x: r.minX + (CGFloat(c) + 0.5) * r.width / CGFloat(colCount))
+            if frameIdx >= 0 && frameIdx < hist.count {
+                col.noise = hist[frameIdx].noise
+                var v: [Double] = []
+                for k in max(0, frameIdx - half)...min(hist.count - 1, frameIdx + half) where hist[k].speech != nil {
+                    v.append(hist[k].db)
+                }
+                if v.count >= 4 {
+                    v.sort()
+                    func q(_ p: Double) -> Double { v[min(v.count - 1, Int(p * Double(v.count - 1) + 0.5))] }
+                    col.lo = q(0.1); col.q1 = q(0.25); col.med = q(0.5); col.q3 = q(0.75); col.hi = q(0.9)
+                }
             }
+            cols.append(col)
         }
-        NSColor.controlAccentColor.setStroke()
-        line.stroke()
+        func area(_ lower: (Col) -> Double?, _ upper: (Col) -> Double?, _ color: NSColor) {
+            color.setFill()
+            var run: [(CGFloat, Double, Double)] = []
+            func flush() {
+                defer { run = [] }
+                guard run.count >= 2 else { return }
+                let p = NSBezierPath()
+                p.move(to: NSPoint(x: run[0].0, y: y(run[0].2, in: r)))
+                for (x, _, hi) in run.dropFirst() { p.line(to: NSPoint(x: x, y: y(hi, in: r))) }
+                for (x, lo, _) in run.reversed() { p.line(to: NSPoint(x: x, y: y(lo, in: r))) }
+                p.close(); p.fill()
+            }
+            for c in cols { if let lo = lower(c), let hi = upper(c) { run.append((c.x, lo, hi)) } else { flush() } }
+            flush()
+        }
+        area({ $0.noise == nil ? nil : self.minDb }, { $0.noise }, NSColor.tertiaryLabelColor.withAlphaComponent(0.12))
+        let accent = NSColor.controlAccentColor
+        area({ $0.lo }, { $0.hi }, accent.withAlphaComponent(0.13))
+        area({ $0.q1 }, { $0.q3 }, accent.withAlphaComponent(0.30))
+        let trend = NSBezierPath()
+        trend.lineWidth = 2
+        trend.lineJoinStyle = .round
+        var drawing = false
+        for c in cols {
+            guard let m = c.med else { drawing = false; continue }
+            let p = NSPoint(x: c.x, y: y(m, in: r))
+            drawing ? trend.line(to: p) : trend.move(to: p)
+            drawing = true
+        }
+        accent.setStroke()
+        trend.stroke()
 
         if let b = d.baseline {
             let base = NSBezierPath()

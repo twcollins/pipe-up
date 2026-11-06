@@ -70,13 +70,21 @@ Click the icon for:
 
 ### History window
 
-A resizable window with a time range picker (**1m · 5m · 15m · 1h · 4h · 24h**) and a
-**Keep on top** option, so you can leave it in a corner during a call. It shows:
+A resizable window with a time range picker (**1m · 5m · 15m · 1h · 4h · 24h**), a
+**Keep on top** option so you can leave it in a corner during a call, and a legend.
+Instead of plotting every second (which is spiky), it summarises your speaking level
+over a sliding window (6 s at 1m, 20 s at 5m, 90 s at 1h, about 36 min at 24h):
 
-- grey: mic level (light = loudest moment, darker = average)
-- blue: your speaking level · dashed: your normal level · dotted orange: the alert line
-- orange / red bands: times you were quiet / the mic was silent
+- **Trend**: solid blue line, the median of your speaking level
+- **Typical range**: darker blue band, the middle 50% of your speaking level
+- **Full range**: lighter blue band, 10th to 90th percentile
+- **Normal** (dashed) and **Alert line** (dotted orange)
+- **Background**: grey area along the bottom, the room/mic noise level
+- **Dropped / Silent**: orange or red shading with a strip along the top
 - gaps: the app wasn't running
+- **Show raw level** brings back the per-second detail if you want it
+
+The small graph in the menu uses the same bands and trend over the last minute.
 
 Hover to read exact values at any moment. The footer summarises the visible range:
 number of quiet alerts, time spent quiet or silent, time talking and average speaking level.
