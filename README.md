@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/icon.svg" width="120" alt="Pipe Up icon: a smiling microphone"></p>
+<p align="center"><img src="assets/social-preview.png" alt="Pipe Up: catch the moment your voice goes low or quiet on a call"></p>
 
 # Pipe Up
 
