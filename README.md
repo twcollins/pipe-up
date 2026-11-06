@@ -1,7 +1,5 @@
 <p align="center"><img src="assets/social-preview.png" alt="Pipe Up: catch the moment your voice goes low or quiet on a call"></p>
 
-# Pipe Up
-
 Pipe Up helps you catch the moment your voice goes low or quiet on a call, while it's
 happening, instead of finding out later when someone says they couldn't hear you.
 
