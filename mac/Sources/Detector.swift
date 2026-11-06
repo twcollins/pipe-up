@@ -101,7 +101,7 @@ final class LevelDetector {
         }
         noiseFloor = min(max(noiseFloor, -110), -35)
 
-        let isSpeech = db > max(noiseFloor + 9, -70)
+        let isSpeech = db > max(noiseFloor + 9, -90)
 
         if isSpeech {
             sinceSpeech = 0

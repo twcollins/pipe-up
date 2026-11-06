@@ -15,7 +15,7 @@ final class TimelineView: NSView {
     var showRaw = false
     var onHover: ((String?) -> Void)?
 
-    private let minDb: Float = -70, maxDb: Float = 0
+    private var minDb: Float = -70, maxDb: Float = 0   // fitted to the data on each draw
     private var hoverX: CGFloat?
     private let margins = NSEdgeInsets(top: 10, left: 44, bottom: 24, right: 12)
     private let columnWidth: CGFloat = 3
@@ -109,6 +109,12 @@ final class TimelineView: NSView {
             if !bg.isEmpty { bg.sort(); col.background = percentile(bg, 0.5) }
             cols.append(col)
         }
+        // Join trends up across pauses (but not across times the app wasn't running).
+        let allowed = cols.map(\.hasData)
+        for kp in [\Column.p10, \.p25, \.p50, \.p75, \.p90, \.background] as [WritableKeyPath<Column, Float?>] {
+            let filled = GraphUtil.fillGaps(cols.map { $0[keyPath: kp] }, allowed: allowed)
+            for k in cols.indices { cols[k][keyPath: kp] = filled[k] }
+        }
         // Light smoothing (±2 columns) to take the steps out of the percentiles.
         let paths: [WritableKeyPath<Column, Float?>] = [\.p10, \.p25, \.p50, \.p75, \.p90, \.background]
         for kp in paths {
@@ -127,6 +133,18 @@ final class TimelineView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let r = plotRect
         let end = Date().timeIntervalSince1970
+        let cols = columns(width: r.width, end: end)
+
+        // Fit the y-axis to what's visible, so quiet mics aren't squashed at the bottom.
+        var vals: [Double] = []
+        for c in cols {
+            for v in [c.p10, c.p90, c.background, c.baseline, c.threshold] { if let v { vals.append(Double(v)) } }
+            if showRaw, let lv = c.rawLevel { vals.append(Double(lv)) }
+        }
+        let fit = GraphUtil.niceRange(vals)
+        minDb = Float(fit.lo); maxDb = Float(fit.hi)
+        let labelEvery: Float = maxDb - minDb > 50 ? 20 : 10
+
         NSColor.quaternaryLabelColor.withAlphaComponent(0.2).setFill()
         NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
 
@@ -135,11 +153,12 @@ final class TimelineView: NSView {
             .foregroundColor: NSColor.secondaryLabelColor]
 
         // dB grid
-        for db in stride(from: Float(-60), through: 0, by: 10) {
+        for db in stride(from: minDb, through: maxDb, by: 10) {
             let yy = y(db, r)
-            NSColor.separatorColor.withAlphaComponent(db.truncatingRemainder(dividingBy: 20) == 0 ? 0.6 : 0.25).setFill()
+            let major = db.truncatingRemainder(dividingBy: labelEvery) == 0
+            NSColor.separatorColor.withAlphaComponent(major ? 0.6 : 0.25).setFill()
             NSRect(x: r.minX, y: yy, width: r.width, height: 0.5).fill()
-            if Int(db) % 20 == 0 {
+            if major {
                 let s = "\(Int(db)) dB" as NSString
                 let sz = s.size(withAttributes: labelAttrs)
                 s.draw(at: NSPoint(x: r.minX - sz.width - 6, y: yy - sz.height / 2), withAttributes: labelAttrs)
@@ -161,7 +180,6 @@ final class TimelineView: NSView {
             t += tick
         }
 
-        let cols = columns(width: r.width, end: end)
         let w = r.width / CGFloat(cols.count)
         func x(_ i: Int) -> CGFloat { r.minX + (CGFloat(i) + 0.5) * w }
 
@@ -169,12 +187,23 @@ final class TimelineView: NSView {
         NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).addClip()
 
         // Level-dropped / silent periods: merged blocks + a solid strip along the top.
+        // Short breaks (pauses between phrases) are merged so a drop reads as one block.
+        var kinds = cols.map { $0.silent ? 2 : $0.quiet ? 1 : 0 }
+        let maxGap = max(3, Int(12 / columnWidth))
+        var lastFlag: (idx: Int, kind: Int)?
+        for k in kinds.indices where kinds[k] > 0 {
+            if let lf = lastFlag, lf.kind == kinds[k], k - lf.idx > 1, k - lf.idx <= maxGap,
+               ((lf.idx + 1)..<k).allSatisfy({ kinds[$0] == 0 && cols[$0].hasData }) {
+                for m in (lf.idx + 1)..<k { kinds[m] = kinds[k] }
+            }
+            lastFlag = (k, kinds[k])
+        }
         var i = 0
         while i < cols.count {
-            let kind = cols[i].silent ? 2 : cols[i].quiet ? 1 : 0
+            let kind = kinds[i]
             guard kind > 0 else { i += 1; continue }
             var j = i
-            while j + 1 < cols.count, (cols[j + 1].silent ? 2 : cols[j + 1].quiet ? 1 : 0) == kind { j += 1 }
+            while j + 1 < cols.count, kinds[j + 1] == kind { j += 1 }
             let color: NSColor = kind == 2 ? .systemRed : .systemOrange
             let rect = NSRect(x: r.minX + CGFloat(i) * w, y: r.minY, width: CGFloat(j - i + 1) * w, height: r.height)
             color.withAlphaComponent(0.10).setFill(); rect.fill()

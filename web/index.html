@@ -231,7 +231,7 @@
       }
       this.noiseFloor = Math.min(Math.max(this.noiseFloor, -110), -35);
 
-      const isSpeech = db > Math.max(this.noiseFloor + 9, -70);
+      const isSpeech = db > Math.max(this.noiseFloor + 9, -90);
       if (isSpeech) {
         this.sinceSpeech = 0; this.speechSeconds += dt;
         this.shortTerm = this.shortTerm == null ? db : E(this.shortTerm, db, dt, 1.5);

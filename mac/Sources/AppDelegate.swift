@@ -44,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
-    private let graph = GraphView(frame: NSRect(x: 0, y: 0, width: 320, height: 130))
+    private let graph = GraphView(frame: NSRect(x: 0, y: 0, width: 400, height: 230))
     private let deviceItem = NSMenuItem(title: "Mic: —", action: nil, keyEquivalent: "")
     private let volumeLabel = NSTextField(labelWithString: "Input volume")
     private let volumeSlider = NSSlider(value: 0, minValue: 0, maxValue: 1, target: nil, action: nil)
@@ -502,11 +502,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         deviceItem.isEnabled = false
         menu.addItem(deviceItem)
 
-        let volView = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 46))
-        volumeLabel.frame = NSRect(x: 20, y: 26, width: 280, height: 16)
+        let volView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 46))
+        volumeLabel.frame = NSRect(x: 20, y: 26, width: 360, height: 16)
         volumeLabel.font = .menuFont(ofSize: 12)
         volumeLabel.textColor = .secondaryLabelColor
-        volumeSlider.frame = NSRect(x: 18, y: 4, width: 284, height: 20)
+        volumeSlider.frame = NSRect(x: 18, y: 4, width: 364, height: 20)
         volumeSlider.target = self
         volumeSlider.action = #selector(sliderMoved(_:))
         volumeSlider.isContinuous = true

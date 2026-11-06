@@ -84,7 +84,11 @@ over a sliding window (6 s at 1m, 20 s at 5m, 90 s at 1h, about 36 min at 24h):
 - gaps: the app wasn't running
 - **Show raw level** brings back the per-second detail if you want it
 
-The small graph in the menu uses the same bands and trend over the last minute.
+The trend and bands are joined up across pauses (but not across times the app wasn't
+running), and the y-axis zooms to fit your actual levels, so a quiet mic still fills
+the graph.
+
+The small graph in the menu (now larger) uses the same bands, joined-up trend and auto-zoom over the last minute.
 
 Hover to read exact values at any moment. The footer summarises the visible range:
 number of quiet alerts, time spent quiet or silent, time talking and average speaking level.
