@@ -84,9 +84,11 @@
   body.mini { background: var(--surface); }
   body.mini .widget { border: 0; border-radius: 0; min-height: 100vh; padding: 12px 14px; display: flex; flex-direction: column; justify-content: center; }
 
-  canvas { width: 100%; height: 120px; display: block; border-radius: 8px; background: var(--surface-2); }
+  canvas { width: 100%; height: 190px; display: block; border-radius: 8px; background: var(--surface-2); }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
-  .legend span::before { content: ""; display: inline-block; width: 12px; height: 3px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+  .legend span::before { content: ""; display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+  .legend span.band::before { height: 9px; border-radius: 2px; }
+  .legend span.dash::before { height: 0; background: none; border-top: 2px dashed var(--c); }
   details summary { cursor: pointer; font-weight: 600; }
   details p, details li { color: var(--muted); }
   .notice { margin-top: 10px; font-size: 13px; color: var(--accent); min-height: 1.2em; }
@@ -134,10 +136,12 @@
     <div class="card">
       <canvas id="graph"></canvas>
       <div class="legend small">
-        <span style="--c: var(--bar)">Mic level</span>
-        <span style="--c: var(--accent)">Your speaking level</span>
-        <span style="--c: var(--text)">Your normal</span>
-        <span style="--c: var(--warn)">Alert line</span>
+        <span style="--c: var(--accent)">Trend</span>
+        <span class="band" style="--c: color-mix(in srgb, var(--accent) 35%, transparent)">Typical</span>
+        <span class="band" style="--c: color-mix(in srgb, var(--accent) 15%, transparent)">Full range</span>
+        <span class="dash" style="--c: var(--text)">Your normal</span>
+        <span class="dash" style="--c: var(--warn)">Alert line</span>
+        <span class="band" style="--c: var(--bar)">Background</span>
       </div>
       <p class="small" id="stats" style="margin: 6px 0 0;"></p>
     </div>
@@ -265,7 +269,7 @@
         : this.quietFor >= 2 ? "quiet" : "ok";
 
       if (this.state === "ok" && this.baselineNoiseFloor != null) this.baselineNoiseFloor = E(this.baselineNoiseFloor, this.noiseFloor, dt, 120);
-      this.history.push({ db, speech: isSpeech ? this.shortTerm : null });
+      this.history.push({ db, speech: isSpeech ? this.shortTerm : null, noise: this.noiseFloor });
       if (this.history.length > this.historyLength) this.history.shift();
     }
   }
@@ -531,6 +535,31 @@
 
   // ---------- graph ----------
   function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  // Same approach as the Mac app's menu graph: for each column, the spread of
+  // speech levels in a ~4 s window (bands) and its median (trend), joined up
+  // across pauses, with a y-axis that zooms to fit your levels.
+  let gLo = -70, gHi = 0, gInit = false;
+
+  function fillGaps(arr) {
+    let last = -1;
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] == null) continue;
+      if (last >= 0 && i - last > 1) for (let k = last + 1; k < i; k++) arr[k] = arr[last] + (arr[i] - arr[last]) * (k - last) / (i - last);
+      last = i;
+    }
+    return arr;
+  }
+
+  function niceRange(vals, minSpan = 30) {
+    vals = vals.filter((v) => v != null && isFinite(v) && v > -110);
+    if (!vals.length) return [-70, 0];
+    let lo = Math.floor((Math.min(...vals) - 4) / 10) * 10, hi = Math.ceil((Math.max(...vals) + 4) / 10) * 10;
+    if (hi - lo < minSpan) { hi += Math.ceil((minSpan - (hi - lo)) / 20) * 10; lo = hi - Math.max(minSpan, hi - lo); }
+    hi = Math.min(hi, 0); lo = Math.max(lo, -110);
+    if (hi - lo < minSpan) lo = Math.max(-110, hi - minSpan);
+    return [lo, hi];
+  }
+
   function drawGraph() {
     const c = $("graph");
     const dpr = window.devicePixelRatio || 1;
@@ -540,26 +569,91 @@
     const g = c.getContext("2d");
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    const y = (db) => H - (Math.min(Math.max(db, -70), 0) + 70) / 70 * H;
-    const n = det.historyLength, step = W / n, off = n - det.history.length;
 
-    g.fillStyle = cssVar("--bar");
-    det.history.forEach((s, i) => { const top = y(s.db); g.fillRect((i + off) * step, top, Math.max(step, 1), H - top); });
+    const axis = 30, top = 8, bottom = 6;
+    const PW = W - axis, PH = H - top - bottom;
+    const hist = det.history, n = det.historyLength, off = n - hist.length;
 
-    g.strokeStyle = cssVar("--accent"); g.lineWidth = 2; g.beginPath();
-    let drawing = false;
-    det.history.forEach((s, i) => {
-      if (s.speech == null) { drawing = false; return; }
-      const x = (i + off) * step, yy = y(s.speech);
-      drawing ? g.lineTo(x, yy) : g.moveTo(x, yy); drawing = true;
-    });
-    g.stroke();
+    // Columns
+    const colCount = Math.max(1, Math.floor(PW / 3)), half = 20;
+    const cols = [];
+    for (let ci = 0; ci < colCount; ci++) {
+      const fi = Math.floor((ci + 0.5) / colCount * n) - off;
+      const col = { x: axis + (ci + 0.5) * PW / colCount, live: fi >= 0 && fi < hist.length };
+      if (col.live) {
+        col.noise = hist[fi].noise;
+        const v = [];
+        for (let k = Math.max(0, fi - half); k <= Math.min(hist.length - 1, fi + half); k++) if (hist[k].speech != null) v.push(hist[k].db);
+        if (v.length >= 3) {
+          v.sort((a, b) => a - b);
+          const q = (p) => { const idx = p * (v.length - 1), a = Math.floor(idx), b = Math.min(v.length - 1, a + 1); return v[a] + (v[b] - v[a]) * (idx - a); };
+          col.p10 = q(0.1); col.p25 = q(0.25); col.p50 = q(0.5); col.p75 = q(0.75); col.p90 = q(0.9);
+        }
+      }
+      cols.push(col);
+    }
+    for (const key of ["p10", "p25", "p50", "p75", "p90"]) {
+      const filled = fillGaps(cols.map((c) => c[key] ?? null));
+      cols.forEach((c, i) => { c[key] = filled[i]; });
+    }
+
+    // Fit y-axis (eases toward the target so it doesn't jump)
+    const vals = [];
+    cols.forEach((c) => { vals.push(c.p10, c.p90, c.noise); });
+    if (det.baseline != null) vals.push(det.baseline, det.baseline - det.dropDb);
+    const [tLo, tHi] = niceRange(vals);
+    if (!gInit) { gLo = tLo; gHi = tHi; gInit = vals.some((v) => v != null); }
+    else { gLo += (tLo - gLo) * 0.15; gHi += (tHi - gHi) * 0.15; }
+    const y = (db) => top + PH - (Math.min(Math.max(db, gLo), gHi) - gLo) / (gHi - gLo) * PH;
+
+    // Grid + labels
+    g.font = "10px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    g.textAlign = "right"; g.textBaseline = "middle";
+    for (let d = Math.ceil(gLo / 10) * 10; d <= gHi; d += 10) {
+      const yy = y(d);
+      g.fillStyle = cssVar("--border"); g.fillRect(axis, yy, PW, 1);
+      g.fillStyle = cssVar("--muted"); g.fillText(String(d), axis - 5, yy);
+    }
+
+    // Faint raw level
+    const step = PW / n;
+    g.globalAlpha = 0.35; g.fillStyle = cssVar("--bar");
+    hist.forEach((s, i) => { const yy = y(s.db); g.fillRect(axis + (i + off) * step, yy, Math.max(step, 1), top + PH - yy); });
+    g.globalAlpha = 1;
+
+    const area = (lower, upper, color, alpha) => {
+      g.fillStyle = color; g.globalAlpha = alpha;
+      let run = [];
+      const flush = () => {
+        if (run.length >= 2) {
+          g.beginPath(); g.moveTo(run[0].x, y(run[0].hi));
+          run.slice(1).forEach((p) => g.lineTo(p.x, y(p.hi)));
+          [...run].reverse().forEach((p) => g.lineTo(p.x, y(p.lo)));
+          g.closePath(); g.fill();
+        }
+        run = [];
+      };
+      cols.forEach((c) => { const lo = lower(c), hi = upper(c); if (lo != null && hi != null) run.push({ x: c.x, lo, hi }); else flush(); });
+      flush(); g.globalAlpha = 1;
+    };
+    area((c) => (c.noise == null ? null : gLo), (c) => c.noise, cssVar("--bar"), 0.55);
+    const accent = cssVar("--accent");
+    area((c) => c.p10, (c) => c.p90, accent, 0.15);
+    area((c) => c.p25, (c) => c.p75, accent, 0.35);
 
     if (det.baseline != null) {
-      const line = (db, color, dash) => { g.strokeStyle = color; g.lineWidth = 1; g.setLineDash(dash); g.beginPath(); g.moveTo(0, y(db)); g.lineTo(W, y(db)); g.stroke(); g.setLineDash([]); };
+      const line = (db, color, dash) => { g.strokeStyle = color; g.lineWidth = 1; g.setLineDash(dash); g.beginPath(); g.moveTo(axis, y(db)); g.lineTo(W, y(db)); g.stroke(); g.setLineDash([]); };
       line(det.baseline, cssVar("--text"), [5, 4]);
       line(det.baseline - det.dropDb, cssVar("--warn"), [2, 3]);
     }
+
+    g.strokeStyle = accent; g.lineWidth = 2.2; g.lineJoin = "round"; g.beginPath();
+    let drawing = false;
+    cols.forEach((c) => {
+      if (c.p50 == null) { drawing = false; return; }
+      drawing ? g.lineTo(c.x, y(c.p50)) : g.moveTo(c.x, y(c.p50)); drawing = true;
+    });
+    g.stroke();
   }
 
   // ---------- favicon / beep / notices ----------
