@@ -9,10 +9,13 @@ final class GraphView: NSView {
     weak var detector: LevelDetector?
     var headline = ""
     var subline = ""
+    var onClick: (() -> Void)?
 
     private let minDb = -70.0, maxDb = 0.0
 
     override var isFlipped: Bool { false }
+
+    override func mouseUp(with event: NSEvent) { onClick?() }
 
     private func y(_ db: Double, in r: NSRect) -> CGFloat {
         let t = (min(max(db, minDb), maxDb) - minDb) / (maxDb - minDb)
@@ -83,5 +86,9 @@ final class GraphView: NSView {
             thr.stroke()
         }
         NSGraphicsContext.restoreGraphicsState()
+        let hint = "Click for full history" as NSString
+        let hintAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor.tertiaryLabelColor]
+        // Drawn last, inside the graph's top-right corner so it never collides with the headline.
+        hint.draw(at: NSPoint(x: bounds.maxX - pad - hint.size(withAttributes: hintAttrs).width - 6, y: bounds.height - 48 - 14), withAttributes: hintAttrs)
     }
 }

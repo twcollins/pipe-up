@@ -55,10 +55,43 @@ a small level bar appears in the menu bar.
 Click the icon for:
 
 - a 60-second graph of your level, your speaking level, your normal level and the alert line
+  (click it, or press ⌘H, to open the **history window**)
+- **Open data folder (CSV)**
 - the current mic and a **macOS input volume slider**
 - **Lock input volume**: if any app changes it, it's put straight back
 - **Re-learn my normal level** (use after changing mic or seating position)
 - sensitivity (6 / 8 / 10 / 12 dB drop), on-screen alert, silent alert, sound, open at login
+
+### History window
+
+A resizable window with a time range picker (**1m · 5m · 15m · 1h · 4h · 24h**) and a
+**Keep on top** option, so you can leave it in a corner during a call. It shows:
+
+- grey: mic level (light = loudest moment, darker = average)
+- blue: your speaking level · dashed: your normal level · dotted orange: the alert line
+- orange / red bands: times you were quiet / the mic was silent
+- gaps: the app wasn't running
+
+Hover to read exact values at any moment. The footer summarises the visible range:
+number of quiet alerts, time spent quiet or silent, time talking and average speaking level.
+The last 24 hours are reloaded when the app starts.
+
+### Stored data (for your own analysis)
+
+Everything is saved locally in `~/Library/Application Support/MicHelper/`:
+
+- `history/YYYY-MM-DD.csv` has one row per second:
+  `timestamp, epoch, level_db, peak_db, speech_db, normal_db, alert_line_db, state, input_volume, device`.
+  `speech_db` is empty when you weren't talking. `state` is `calibrating`, `ok`, `quiet` or `silent`.
+- `events.csv` holds the moments that matter: `state_quiet` (with how big the drop was),
+  `state_ok`, `state_silent`, `mic_switched`, `input_volume_lowered`, `input_volume_restored`,
+  `relearn_normal_level`, `app_started` and `app_quit`.
+
+Only levels are stored, never audio. Daily files older than 90 days are deleted automatically.
+A full day of continuous use is roughly 8 MB.
+
+Quick look in a terminal: `grep ',quiet,' ~/Library/Application\ Support/MicHelper/history/$(date +%F).csv | wc -l`
+gives the seconds you spent quiet today. Or open the CSVs in Numbers or Excel.
 
 Notes:
 

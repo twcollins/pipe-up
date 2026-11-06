@@ -8,6 +8,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let detector = LevelDetector()
     private let monitor = AudioMonitor()
     private let hud = HUD()
+    private let history = HistoryStore()
+    private lazy var historyWindow: HistoryWindowController = {
+        let c = HistoryWindowController(store: history)
+        c.openDataFolder = { [weak self] in self?.openDataFolder() }
+        return c
+    }()
+
+    // Per-second accumulator for the history log.
+    private var accSecond = 0
+    private var accEnergy = 0.0, accDur = 0.0, accPeak = -200.0
+    private var accSpeechSum = 0.0, accSpeechN = 0
+    private var accState: HistoryRecord.State = .calibrating
 
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
@@ -59,6 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         detector.dropDb = dropDb
         graph.detector = detector
+        graph.onClick = { [weak self] in
+            self?.menu.cancelTracking()
+            self?.showHistory()
+        }
+        history.load { [weak self] in self?.historyWindow.refresh() }
+        history.event("app_started")
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.imagePosition = .imageLeft
@@ -73,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let new = CoreAudioDevice.defaultInputDevice()
             if new != self.device {
                 let name = new.map(CoreAudioDevice.name(of:)) ?? "no device"
+                self.history.event("mic_switched", name)
                 self.scheduleRestart(reason: "Mic switched to \(name)")
             }
         }
@@ -85,6 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         monitor.stop()
+        history.event("app_quit")
+        history.flush(sync: true)
     }
 
     private func requestPermissionAndStart() {
@@ -155,10 +176,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if lockVolume, let locked = defaults.object(forKey: "lockedVolume") as? Float, abs(v - locked) > 0.02 {
             CoreAudioDevice.setInputVolume(id, locked)
+            history.event("input_volume_restored", "\(pct(v)) -> \(pct(locked))")
             notice("An app changed input volume to \(pct(v)) — restored \(pct(locked))")
             return
         }
         if let old = lastVolume, v < old - 0.05 {
+            history.event("input_volume_lowered", "\(pct(old)) -> \(pct(v))")
             notice("Input volume lowered: \(pct(old)) → \(pct(v))")
         }
     }
@@ -170,11 +193,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func handleLevel(_ db: Double, _ dt: Double) {
         detector.process(db: db, dt: dt)
         let state = effectiveState
+        recordHistory(db: db, dt: dt, state: state)
 
         if state != lastState {
             if state == .quiet, playSound, Date().timeIntervalSince(lastSound) > 20 {
                 NSSound(named: "Tink")?.play()
                 lastSound = Date()
+            }
+            if state == .quiet || state == .silent || lastState == .quiet || lastState == .silent {
+                let detail = state == .quiet ? "drop \(Int((detector.dropAmount ?? 0).rounded())) dB" : ""
+                history.event("state_\(state)", detail)
             }
             lastState = state
         }
@@ -182,6 +210,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private enum UIState { case calibrating, ok, quiet, silent, muted }
+
+    private func recordHistory(db: Double, dt: Double, state: LevelDetector.State) {
+        let sec = Int(Date().timeIntervalSince1970)
+        if sec != accSecond {
+            if accDur > 0 {
+                let d = detector
+                let rec = HistoryRecord(
+                    time: Double(accSecond),
+                    level: Float(10 * log10(max(accEnergy / accDur, 1e-14))),
+                    peak: Float(accPeak),
+                    speech: accSpeechN > 0 ? Float(accSpeechSum / Double(accSpeechN)) : nil,
+                    baseline: d.baseline.map(Float.init),
+                    threshold: d.baseline.map { Float($0 - d.dropDb) },
+                    state: accState,
+                    volume: lastVolume)
+                history.append(rec, device: deviceName)
+            }
+            accSecond = sec
+            accEnergy = 0; accDur = 0; accPeak = -200; accSpeechSum = 0; accSpeechN = 0
+            accState = .calibrating
+        }
+        accEnergy += pow(10, db / 10) * dt
+        accDur += dt
+        accPeak = max(accPeak, db)
+        if detector.history.last?.speech != nil { accSpeechSum += db; accSpeechN += 1 }
+        // Keep the most severe state seen during the second.
+        let s: HistoryRecord.State = state == .silent ? .silent : state == .quiet ? .quiet : state == .ok ? .ok : .calibrating
+        if s.rawValue > accState.rawValue { accState = s }
+    }
+
+    private func showHistory() { historyWindow.show() }
+
+    private func openDataFolder() {
+        history.flush()
+        NSWorkspace.shared.open(history.folder)
+    }
 
     private var effectiveState: LevelDetector.State { muted ? .silent : detector.state }
 
@@ -324,6 +388,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lockItem = item("Lock input volume (undo apps lowering it)", #selector(toggleLock))
         menu.addItem(.separator())
 
+        let histItem = item("Show history graph…", #selector(showHistoryAction))
+        histItem.keyEquivalent = "h"
+        item("Open data folder (CSV)", #selector(openDataFolderAction))
+        menu.addItem(.separator())
         item("Re-learn my normal level", #selector(recalibrate))
         let sens = NSMenuItem(title: "Alert when quieter by", action: nil, keyEquivalent: "")
         let sub = NSMenu()
@@ -389,7 +457,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateVolumeControls()
     }
 
+    @objc private func showHistoryAction() { showHistory() }
+    @objc private func openDataFolderAction() { openDataFolder() }
+
     @objc private func recalibrate() {
+        history.event("relearn_normal_level")
         detector.reset()
         notice("Re-learning your normal level — just talk normally")
     }
