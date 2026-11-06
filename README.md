@@ -16,7 +16,7 @@ There are two versions:
 | | `mac/`: native menu bar app | `web/`: no-install browser version |
 |---|---|---|
 | Install | Build once (needs Xcode command line tools) | Nothing. Open a web page |
-| Lives in | Menu bar icon with live level bar | Small always-on-top mini window (Chrome/Edge) |
+| Lives in | Menu bar icon with live level bar | Small mini window (always-on-top in Chrome/Edge) |
 | When your level drops | Icon turns orange + "Low", click-through pill under the menu bar (works over full-screen Zoom/Teams) | Mini window turns orange, tab title + favicon change, optional notification/beep |
 | Sees macOS input volume changes | ✅ alerts when an app lowers it, can lock it | ❌ (you still see the resulting level drop) |
 | Detects mic switching (e.g. AirPods take over) | ✅ | ✅ (when using "System default") |
@@ -159,11 +159,12 @@ A single HTML file. Nothing to install, so it works on a locked-down work laptop
 (Mac or Windows).
 
 **Option A: hosted (recommended).** Open
-**https://twcollins.github.io/pipe-up/web/** in Chrome or Edge. The browser
-remembers the mic permission.
+**https://twcollins.github.io/pipe-up/web/** in any modern browser (Chrome, Edge,
+Firefox or Safari). The browser remembers the mic permission. In Safari, set the
+site to "Allow" in Safari → Settings → Websites → Microphone, or it asks every visit.
 
 **Option B: local file.** Download [`web/index.html`](web/index.html) and open it
-in Chrome or Edge.
+in any modern browser.
 
 Then:
 
@@ -183,7 +184,8 @@ Diagnostics panel with live numbers and a **Check now** button. The browser can'
 computer's input volume or which apps use the mic, so those findings are Mac-only.
 
 The always-on-top mini window uses Document Picture-in-Picture (Chrome/Edge 116+).
-Other browsers get a normal small pop-up window instead.
+Firefox and Safari get a normal small pop-up window instead (allow pop-ups for the
+page). It works the same but can go behind other windows.
 
 ---
 

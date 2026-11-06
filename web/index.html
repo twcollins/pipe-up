@@ -404,9 +404,10 @@
 
     source = ctx.createMediaStreamSource(stream);
     if (useWorklet) {
-      meter = new AudioWorkletNode(ctx, "mh-meter", { numberOfInputs: 1, numberOfOutputs: 0 });
+      meter = new AudioWorkletNode(ctx, "mh-meter", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
       meter.port.onmessage = (e) => onFrame(e.data);
       source.connect(meter);
+      meter.connect(ctx.destination);  // outputs silence; some browsers (Safari) skip nodes not connected to the output
     } else {
       const chans = Math.max(1, Math.min(source.channelCount || 1, 8));
       meter = ctx.createScriptProcessor(4096, chans, 1);
