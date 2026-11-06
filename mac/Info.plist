@@ -8,6 +8,8 @@
     <string>Pipe Up</string>
     <key>CFBundleIdentifier</key>
     <string>com.twcollins.pipe-up</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>PipeUp</string>
     <key>CFBundlePackageType</key>

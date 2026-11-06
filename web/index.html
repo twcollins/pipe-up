@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pipe Up</title>
 <meta name="description" content="Helps you catch when your voice goes low or quiet on a call. Runs entirely in your browser — nothing is recorded or sent anywhere.">
-<link id="favicon" rel="icon" href="data:,">
+<link id="favicon" rel="icon" href="data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgNTEyIDUxMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHJ4PSIxMTQiIGZpbGw9IiNGRkQ2NkIiLz4KPHBhdGggZD0iTTEzOCAyNTBhMTE4IDExOCAwIDAgMCAyMzYgMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMjMyNzJFIiBzdHJva2Utd2lkdGg9IjIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPHBhdGggZD0iTTI1NiAzNjh2NTJNMjAwIDQyNmgxMTIiIHN0cm9rZT0iIzIzMjcyRSIgc3Ryb2tlLXdpZHRoPSIyMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CjxyZWN0IHg9IjE4NiIgeT0iODAiIHdpZHRoPSIxNDAiIGhlaWdodD0iMjM2IiByeD0iNzAiIGZpbGw9IiNmZmYiIHN0cm9rZT0iIzIzMjcyRSIgc3Ryb2tlLXdpZHRoPSIxOCIvPgo8Y2lyY2xlIGN4PSIyMzIiIGN5PSIxODIiIHI9IjEzIiBmaWxsPSIjMjMyNzJFIi8+CjxjaXJjbGUgY3g9IjI4MCIgY3k9IjE4MiIgcj0iMTMiIGZpbGw9IiMyMzI3MkUiLz4KPHBhdGggZD0iTTIyNiAyMjZxMzAgMzAgNjAgMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMjMyNzJFIiBzdHJva2Utd2lkdGg9IjEzIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPGNpcmNsZSBjeD0iMjE0IiBjeT0iMjE0IiByPSIxMSIgZmlsbD0iI0ZGOEZBMyIgb3BhY2l0eT0iLjgiLz4KPGNpcmNsZSBjeD0iMjk4IiBjeT0iMjE0IiByPSIxMSIgZmlsbD0iI0ZGOEZBMyIgb3BhY2l0eT0iLjgiLz4KPHBhdGggZD0iTTM3NCAxNDBhNzAgNzAgMCAwIDEgMCA5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMkY2RkU0IiBzdHJva2Utd2lkdGg9IjE4IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPHBhdGggZD0iTTQxMCAxMDhhMTE4IDExOCAwIDAgMSAwIDE1NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMkY2RkU0IiBzdHJva2Utd2lkdGg9IjE4IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+">
 <style>
   :root {
     --bg: #f6f7f9; --surface: #ffffff; --surface-2: #eef0f3; --border: #dde1e6;
@@ -96,7 +96,7 @@
 </head>
 <body>
 <main>
-  <h1>Pipe Up</h1>
+  <h1 style="display:flex;align-items:center;gap:10px;"><img src="data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgNTEyIDUxMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHJ4PSIxMTQiIGZpbGw9IiNGRkQ2NkIiLz4KPHBhdGggZD0iTTEzOCAyNTBhMTE4IDExOCAwIDAgMCAyMzYgMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMjMyNzJFIiBzdHJva2Utd2lkdGg9IjIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPHBhdGggZD0iTTI1NiAzNjh2NTJNMjAwIDQyNmgxMTIiIHN0cm9rZT0iIzIzMjcyRSIgc3Ryb2tlLXdpZHRoPSIyMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CjxyZWN0IHg9IjE4NiIgeT0iODAiIHdpZHRoPSIxNDAiIGhlaWdodD0iMjM2IiByeD0iNzAiIGZpbGw9IiNmZmYiIHN0cm9rZT0iIzIzMjcyRSIgc3Ryb2tlLXdpZHRoPSIxOCIvPgo8Y2lyY2xlIGN4PSIyMzIiIGN5PSIxODIiIHI9IjEzIiBmaWxsPSIjMjMyNzJFIi8+CjxjaXJjbGUgY3g9IjI4MCIgY3k9IjE4MiIgcj0iMTMiIGZpbGw9IiMyMzI3MkUiLz4KPHBhdGggZD0iTTIyNiAyMjZxMzAgMzAgNjAgMCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMjMyNzJFIiBzdHJva2Utd2lkdGg9IjEzIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPGNpcmNsZSBjeD0iMjE0IiBjeT0iMjE0IiByPSIxMSIgZmlsbD0iI0ZGOEZBMyIgb3BhY2l0eT0iLjgiLz4KPGNpcmNsZSBjeD0iMjk4IiBjeT0iMjE0IiByPSIxMSIgZmlsbD0iI0ZGOEZBMyIgb3BhY2l0eT0iLjgiLz4KPHBhdGggZD0iTTM3NCAxNDBhNzAgNzAgMCAwIDEgMCA5MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMkY2RkU0IiBzdHJva2Utd2lkdGg9IjE4IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPHBhdGggZD0iTTQxMCAxMDhhMTE4IDExOCAwIDAgMSAwIDE1NiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjMkY2RkU0IiBzdHJva2Utd2lkdGg9IjE4IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KPC9zdmc+" width="34" height="34" alt="">Pipe Up</h1>
   <p class="lede">Learns how your voice normally sounds through your mic and shows you when your level drops, so you can catch it as it happens. Everything runs in this tab. Nothing is recorded or sent anywhere.</p>
 
   <section id="startCard" class="card">
@@ -657,12 +657,21 @@
   }
 
   // ---------- favicon / beep / notices ----------
+  // Tab icon: the Pipe Up icon with a small status dot (green / blue / orange / red).
+  const iconImg = new Image();
+  const iconSrc = document.getElementById("favicon").href;
+  iconImg.src = iconSrc;
   function setFavicon(state) {
     const colors = { ok: cssVar("--ok"), calibrating: cssVar("--accent"), quiet: cssVar("--warn"), silent: cssVar("--bad") };
-    const cv = document.createElement("canvas"); cv.width = cv.height = 32;
-    const g = cv.getContext("2d");
-    g.fillStyle = colors[state] || "#888"; g.beginPath(); g.arc(16, 16, 13, 0, Math.PI * 2); g.fill();
-    $("favicon").href = cv.toDataURL();
+    const draw = () => {
+      const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+      const g = cv.getContext("2d");
+      try { if (iconImg.naturalWidth) g.drawImage(iconImg, 0, 0, 64, 64); } catch {}   // never let the icon break the app
+      g.fillStyle = "#fff"; g.beginPath(); g.arc(50, 50, 14, 0, Math.PI * 2); g.fill();
+      g.fillStyle = colors[state] || "#888"; g.beginPath(); g.arc(50, 50, 10, 0, Math.PI * 2); g.fill();
+      $("favicon").href = cv.toDataURL();
+    };
+    iconImg.complete ? draw() : (iconImg.addEventListener("load", draw, { once: true }), iconImg.addEventListener("error", draw, { once: true }));
   }
 
   function beep() {

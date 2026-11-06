@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.svg" width="120" alt="Pipe Up icon: a smiling microphone"></p>
+
 # Pipe Up
 
 Pipe Up helps you catch the moment your voice goes low or quiet on a call, while it's
@@ -186,6 +188,12 @@ The always-on-top mini window uses Document Picture-in-Picture (Chrome/Edge 116+
 Other browsers get a normal small pop-up window instead.
 
 ---
+
+## Icon
+
+The "mic buddy" icon lives in `assets/`: `icon.svg` (flat, used by the README and web page),
+`icon-macos.svg` (macOS icon grid with shadow, rendered into `mac/Resources/AppIcon.icns`),
+`icon-512.png`, and `social-preview.png` (1280×640, for the GitHub repo's social preview).
 
 ## How detection works
 
