@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Mic Helper</string>
+    <string>Pipe Up</string>
     <key>CFBundleDisplayName</key>
-    <string>Mic Helper</string>
+    <string>Pipe Up</string>
     <key>CFBundleIdentifier</key>
-    <string>com.twcollins.mic-helper</string>
+    <string>com.twcollins.pipe-up</string>
     <key>CFBundleExecutable</key>
-    <string>MicHelper</string>
+    <string>PipeUp</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -23,6 +23,6 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Mic Helper listens to your microphone level (never records or sends audio) so it can warn you when you've gone quiet.</string>
+    <string>Pipe Up listens to your microphone level (never records or sends audio) so it can warn you when you've gone quiet.</string>
 </dict>
 </plist>

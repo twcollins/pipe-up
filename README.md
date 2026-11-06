@@ -1,4 +1,4 @@
-# mic-helper
+# Pipe Up
 
 A small helper that watches your microphone level and tells you when you've
 **gone quiet**, so you can speak up before people have to ask.
@@ -39,7 +39,7 @@ cd mac
 ./build.sh --install          # builds, copies to /Applications, launches
 ```
 
-`./build.sh` on its own just builds `mac/build/Mic Helper.app`.
+`./build.sh` on its own just builds `mac/build/Pipe Up.app`.
 
 On first launch macOS asks for microphone access. Allow it. A mic icon with
 a small level bar appears in the menu bar.
@@ -78,7 +78,7 @@ The last 24 hours are reloaded when the app starts.
 
 ### Stored data (for your own analysis)
 
-Everything is saved locally in `~/Library/Application Support/MicHelper/`:
+Everything is saved locally in `~/Library/Application Support/PipeUp/`:
 
 - `history/YYYY-MM-DD.csv` has one row per second:
   `timestamp, epoch, level_db, peak_db, speech_db, normal_db, alert_line_db, state, input_volume, device`.
@@ -90,7 +90,7 @@ Everything is saved locally in `~/Library/Application Support/MicHelper/`:
 Only levels are stored, never audio. Daily files older than 90 days are deleted automatically.
 A full day of continuous use is roughly 8 MB.
 
-Quick look in a terminal: `grep ',quiet,' ~/Library/Application\ Support/MicHelper/history/$(date +%F).csv | wc -l`
+Quick look in a terminal: `grep ',quiet,' ~/Library/Application\ Support/PipeUp/history/$(date +%F).csv | wc -l`
 gives the seconds you spent quiet today. Or open the CSVs in Numbers or Excel.
 
 Notes:
@@ -109,7 +109,7 @@ A single HTML file. Nothing to install, so it works on a locked-down work laptop
 (Mac or Windows).
 
 **Option A: hosted (recommended).** Open
-**https://twcollins.github.io/mic-helper/web/** in Chrome or Edge. The browser
+**https://twcollins.github.io/pipe-up/web/** in Chrome or Edge. The browser
 remembers the mic permission.
 
 **Option B: local file.** Download [`web/index.html`](web/index.html) and open it

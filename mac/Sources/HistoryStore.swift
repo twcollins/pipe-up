@@ -20,8 +20,8 @@ struct HistoryRecord {
 }
 
 /// Keeps the last 24 h in memory and appends everything to daily CSV files:
-///   ~/Library/Application Support/MicHelper/history/YYYY-MM-DD.csv  (1 row/second)
-///   ~/Library/Application Support/MicHelper/events.csv               (alerts, device changes…)
+///   ~/Library/Application Support/PipeUp/history/YYYY-MM-DD.csv  (1 row/second)
+///   ~/Library/Application Support/PipeUp/events.csv               (alerts, device changes…)
 final class HistoryStore {
     static let header = "timestamp,epoch,level_db,peak_db,speech_db,normal_db,alert_line_db,state,input_volume,device\n"
     static let eventsHeader = "timestamp,epoch,event,detail\n"
@@ -35,7 +35,7 @@ final class HistoryStore {
     private(set) var records: [HistoryRecord] = []
     private var pending: [(day: String, line: String)] = []
     private var pendingEvents: [String] = []
-    private let io = DispatchQueue(label: "mic-helper.history")
+    private let io = DispatchQueue(label: "pipe-up.history")
     private var lastFlush = Date()
 
     private let isoFormatter: ISO8601DateFormatter = {
@@ -53,7 +53,15 @@ final class HistoryStore {
 
     init(folder: URL? = nil) {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        self.folder = folder ?? base.appendingPathComponent("MicHelper", isDirectory: true)
+        self.folder = folder ?? base.appendingPathComponent("PipeUp", isDirectory: true)
+        if folder == nil {
+            // The app used to be called Mic Helper — carry its history over.
+            let old = base.appendingPathComponent("MicHelper", isDirectory: true)
+            let fm = FileManager.default
+            if fm.fileExists(atPath: old.path), !fm.fileExists(atPath: self.folder.path) {
+                try? fm.moveItem(at: old, to: self.folder)
+            }
+        }
         try? FileManager.default.createDirectory(at: historyFolder, withIntermediateDirectories: true)
     }
 

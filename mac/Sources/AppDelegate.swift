@@ -69,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        migrateSettingsFromMicHelper()
         detector.dropDb = dropDb
         graph.detector = detector
         graph.onClick = { [weak self] in
@@ -100,6 +101,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         RunLoop.main.add(timer, forMode: .common)  // keep updating while the menu is open
 
         requestPermissionAndStart()
+    }
+
+    /// The app used to be called Mic Helper (bundle id com.twcollins.mic-helper).
+    private func migrateSettingsFromMicHelper() {
+        guard !defaults.bool(forKey: "migratedFromMicHelper") else { return }
+        if let old = defaults.persistentDomain(forName: "com.twcollins.mic-helper") {
+            for (key, value) in old where defaults.object(forKey: key) == nil {
+                defaults.set(value, forKey: key)
+            }
+        }
+        defaults.set(true, forKey: "migratedFromMicHelper")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -298,7 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let img = NSImage(size: NSSize(width: 22, height: 18), flipped: false) { _ in
             let tint: NSColor = alert ? color : .black
-            if let base = NSImage(systemSymbolName: symbol, accessibilityDescription: "Mic Helper"),
+            if let base = NSImage(systemSymbolName: symbol, accessibilityDescription: "Pipe Up"),
                let sym = base.withSymbolConfiguration(.init(pointSize: 13, weight: .medium).applying(.init(paletteColors: [tint]))) {
                 let s = sym.size
                 sym.draw(in: NSRect(x: 0, y: (18 - s.height) / 2, width: s.width, height: s.height))
@@ -326,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let d = detector
         if permissionDenied {
             graph.headline = "Microphone access needed"
-            graph.subline = "Allow Mic Helper in Privacy & Security → Microphone"
+            graph.subline = "Allow Pipe Up in Privacy & Security → Microphone"
         } else if let err = audioError {
             graph.headline = "Can't read the mic"
             graph.subline = err
@@ -420,7 +432,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         privacyItem.isHidden = true
         item("Sound input settings…", #selector(openSoundSettings))
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Mic Helper", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Pipe Up", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
     }
 
@@ -495,7 +507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch {
             let alert = NSAlert()
             alert.messageText = "Couldn't change the login item"
-            alert.informativeText = "\(error.localizedDescription)\n\nMove Mic Helper to /Applications and try again, or add it in System Settings → General → Login Items."
+            alert.informativeText = "\(error.localizedDescription)\n\nMove Pipe Up to /Applications and try again, or add it in System Settings → General → Login Items."
             NSApp.activate(ignoringOtherApps: true)
             alert.runModal()
         }

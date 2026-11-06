@@ -18,7 +18,7 @@ final class AudioMonitor {
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw NSError(domain: "MicHelper", code: 1, userInfo: [NSLocalizedDescriptionKey: "No input device available"])
+            throw NSError(domain: "PipeUp", code: 1, userInfo: [NSLocalizedDescriptionKey: "No input device available"])
         }
 
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
