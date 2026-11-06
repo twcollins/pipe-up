@@ -1,12 +1,15 @@
 # Pipe Up
 
-A small helper that watches your microphone level and tells you when you've
-**gone quiet**, so you can speak up before people have to ask.
+Pipe Up helps you catch the moment your voice goes low or quiet on a call, while it's
+happening, instead of finding out later when someone says they couldn't hear you.
 
-It learns your normal speaking level, then warns you when you're still talking
-but your level has dropped well below that normal. It also warns when the mic
-stops picking up anything at all. Audio is never recorded or sent anywhere.
-Only the level is measured.
+It learns what your voice normally sounds like through your mic and quietly shows
+when your level drops well below that, whether you've drifted from the mic, an
+app has turned your input down, or the mic has switched or gone silent. It's a
+low-key indicator, not a nag. What you do with it is up to you. An optional
+**expert diagnostics** mode helps work out *why* the level dropped.
+
+Audio is never recorded or sent anywhere. Only the level is measured.
 
 There are two versions:
 
@@ -14,11 +17,12 @@ There are two versions:
 |---|---|---|
 | Install | Build once (needs Xcode command line tools) | Nothing. Open a web page |
 | Lives in | Menu bar icon with live level bar | Small always-on-top mini window (Chrome/Edge) |
-| Alert | Icon turns orange + "Speak up", click-through pill under the menu bar (works over full-screen Zoom/Teams) | Mini window turns orange, tab title + favicon change, optional notification/beep |
+| When your level drops | Icon turns orange + "Low", click-through pill under the menu bar (works over full-screen Zoom/Teams) | Mini window turns orange, tab title + favicon change, optional notification/beep |
 | Sees macOS input volume changes | ✅ alerts when an app lowers it, can lock it | ❌ (you still see the resulting level drop) |
 | Detects mic switching (e.g. AirPods take over) | ✅ | ✅ (when using "System default") |
+| Expert diagnostics (why did it drop?) | ✅ full: gain vs distance vs muffled, input volume, which apps use the mic, Bluetooth call mode | ✅ partial: gain vs distance vs muffled, mic switch |
 
-## Why you might suddenly sound quiet
+## Why your level might suddenly drop
 
 - **Auto-gain in Zoom / Teams / Meet** lowers your macOS input volume. The Mac
   app spots this, and *Lock input volume* puts it back automatically.
@@ -48,8 +52,9 @@ a small level bar appears in the menu bar.
 
 - **Normal**: plain mic icon; the bar moves as you talk.
 - **Calibrating**: for the first ~8 seconds of talking it learns your normal level.
-- **Gone quiet**: the icon turns orange with **"Speak up"** and an orange pill
-  appears at the top of the screen. It goes away as soon as you're back to normal.
+- **Level dropped**: the icon turns orange with **"Low"** and an orange pill
+  ("Your voice level has dropped −11 dB") appears at the top of the screen. It goes
+  away as soon as you're back to normal.
 - **Silent / muted**: the icon turns red and a red pill says the mic is picking up nothing.
 
 Click the icon for:
@@ -61,6 +66,7 @@ Click the icon for:
 - **Lock input volume**: if any app changes it, it's put straight back
 - **Re-learn my normal level** (use after changing mic or seating position)
 - sensitivity (6 / 8 / 10 / 12 dB drop), on-screen alert, silent alert, sound, open at login
+- **Expert** → **Diagnostics** (⌘D) and **Show likely cause in alerts**
 
 ### History window
 
@@ -76,16 +82,48 @@ Hover to read exact values at any moment. The footer summarises the visible rang
 number of quiet alerts, time spent quiet or silent, time talking and average speaking level.
 The last 24 hours are reloaded when the app starts.
 
+### Expert diagnostics: why did my level drop?
+
+Optional, under **Expert** in the menu. Each time your level drops, Pipe Up looks at
+the evidence and names the most likely cause:
+
+| Finding | What it saw | Usually means |
+|---|---|---|
+| **input volume lowered** | macOS input volume is lower than when your normal level was learnt, plus the apps that were using the mic at that moment | Zoom/Teams/Meet auto-gain turned you down. Turn it off in the app, or use *Lock input volume* |
+| **gain dropped** | your voice *and* the background noise fell by about the same amount | something in the signal chain turned down: auto-gain, a headset or interface gain knob, a different mic |
+| **further from mic / softer** | your voice fell but the background stayed the same | you moved back, turned your head, or are talking more softly |
+| **mic muffled / turned away** | your voice lost treble compared with normal | mic pointing away from your mouth, or covered (hand, collar, mask, headset boom moved) |
+| **gain + distance** | background fell, but less than your voice | a mix of the two above |
+| **mic switched** / **mic format changed** | the input device changed, or its sample rate changed | headphones took over as the mic. On Bluetooth a sample rate change means call mode |
+| **louder background** | background noise rose | your voice stands out less |
+
+The background can only be measured during pauses, so the diagnosis is re-checked every
+few seconds while the drop lasts. The first guess may sharpen (e.g. from "gain + distance"
+to "gain dropped") once you've paused.
+
+- **Diagnostics window**: live readout of mic, transport (Bluetooth/USB/built-in), sample
+  rate, input volume now and when your normal level was learnt, macOS Mic Mode, apps
+  currently using the mic, and voice / background / brightness now vs normal. It also has
+  the latest diagnosis, a **Check now** button ("why do I sound quiet right now?"), a
+  running event log, and **Copy report** for pasting into a ticket or chat.
+- **Show likely cause in alerts** adds it to the pill, e.g.
+  "Your voice level has dropped (−11 dB) · likely: input volume lowered".
+- Every diagnosis is written to `events.csv` as a `diagnosis` event, whether or not the
+  expert options are on, so you can review causes later.
+
 ### Stored data (for your own analysis)
 
 Everything is saved locally in `~/Library/Application Support/PipeUp/`:
 
 - `history/YYYY-MM-DD.csv` has one row per second:
-  `timestamp, epoch, level_db, peak_db, speech_db, normal_db, alert_line_db, state, input_volume, device`.
-  `speech_db` is empty when you weren't talking. `state` is `calibrating`, `ok`, `quiet` or `silent`.
+  `timestamp, epoch, level_db, peak_db, speech_db, normal_db, alert_line_db, state, input_volume, device, noise_floor_db, brightness_db`.
+  `speech_db` and `brightness_db` are empty when you weren't talking. `state` is
+  `calibrating`, `ok`, `quiet` (level dropped) or `silent`. `brightness_db` is treble
+  relative to overall level; a fall means a duller, more muffled sound.
 - `events.csv` holds the moments that matter: `state_quiet` (with how big the drop was),
-  `state_ok`, `state_silent`, `mic_switched`, `input_volume_lowered`, `input_volume_restored`,
-  `relearn_normal_level`, `app_started` and `app_quit`.
+  `diagnosis` (likely cause and evidence), `state_ok`, `state_silent`, `mic_switched`,
+  `mic_sample_rate_changed`, `input_volume_lowered` (with the apps using the mic),
+  `input_volume_restored`, `relearn_normal_level`, `app_started` and `app_quit`.
 
 Only levels are stored, never audio. Daily files older than 90 days are deleted automatically.
 A full day of continuous use is roughly 8 MB.
@@ -119,13 +157,18 @@ Then:
 
 1. Click **Start listening** and allow the microphone.
 2. Click **Pop out mini window**. A small always-on-top window shows your
-   level and turns orange when you go quiet. Put it in a corner near your camera.
+   level and turns orange when it drops. Put it in a corner near your camera.
 3. Keep the original tab open. It can be in the background.
 
 It measures the raw mic signal with the browser's echo cancellation, noise
 suppression and auto-gain turned off, and it shares the mic happily with
 Zoom/Teams/Meet. Optional extras: desktop notification and a soft beep (use the
 beep only with headphones).
+
+Tick **Expert: diagnose why my level dropped** for the same gain / distance / muffled /
+mic-switch diagnosis as the Mac app. It adds a "Likely: …" line to the widget and a
+Diagnostics panel with live numbers and a **Check now** button. The browser can't see your
+computer's input volume or which apps use the mic, so those findings are Mac-only.
 
 The always-on-top mini window uses Document Picture-in-Picture (Chrome/Edge 116+).
 Other browsers get a normal small pop-up window instead.
@@ -146,6 +189,9 @@ Both versions use the same algorithm (`mac/Sources/Detector.swift`, and the
    2 seconds **while you're talking**, alert. The alert clears with 2 dB of
    hysteresis, or after 6 s of not talking.
 6. Near-zero signal (below −100 dBFS) for 3 s means the mic is silent or muted.
+7. For diagnostics, also track the background noise and voice "brightness" (energy of
+   the signal's first difference relative to its overall level) when your normal level
+   is learnt, and compare them with the current values when a drop happens.
 
 The baseline adapts slowly so it follows gradual changes, and adapts far more
 slowly while you're quiet so it doesn't simply follow you down.

@@ -23,6 +23,6 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Pipe Up listens to your microphone level (never records or sends audio) so it can warn you when you've gone quiet.</string>
+    <string>Pipe Up listens to your microphone level (never records or sends audio) so it can show you when your voice level drops.</string>
 </dict>
 </plist>

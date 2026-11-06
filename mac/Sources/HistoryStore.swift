@@ -17,13 +17,15 @@ struct HistoryRecord {
     var threshold: Float?         // alert line at the time
     var state: State
     var volume: Float?            // macOS input volume 0…1
+    var noiseFloor: Float? = nil  // background noise level (dBFS)
+    var brightness: Float? = nil  // treble vs overall level while speaking (dB)
 }
 
 /// Keeps the last 24 h in memory and appends everything to daily CSV files:
 ///   ~/Library/Application Support/PipeUp/history/YYYY-MM-DD.csv  (1 row/second)
 ///   ~/Library/Application Support/PipeUp/events.csv               (alerts, device changes…)
 final class HistoryStore {
-    static let header = "timestamp,epoch,level_db,peak_db,speech_db,normal_db,alert_line_db,state,input_volume,device\n"
+    static let header = "timestamp,epoch,level_db,peak_db,speech_db,normal_db,alert_line_db,state,input_volume,device,noise_floor_db,brightness_db\n"
     static let eventsHeader = "timestamp,epoch,event,detail\n"
     let keepInMemory: TimeInterval = 24 * 3600
     let keepOnDiskDays = 90
@@ -120,7 +122,8 @@ final class HistoryStore {
         func n(_ v: Float?) -> String { v.map { String(format: "%.1f", $0) } ?? "" }
         let line = [isoFormatter.string(from: date), String(format: "%.0f", r.time), n(r.level), n(r.peak),
                     n(r.speech), n(r.baseline), n(r.threshold), r.state.name,
-                    r.volume.map { String(format: "%.2f", $0) } ?? "", csvEscape(device)].joined(separator: ",")
+                    r.volume.map { String(format: "%.2f", $0) } ?? "", csvEscape(device),
+                    n(r.noiseFloor), n(r.brightness)].joined(separator: ",")
         pending.append((dayFormatter.string(from: date), line))
         if Date().timeIntervalSince(lastFlush) > 10 { flush() }
     }

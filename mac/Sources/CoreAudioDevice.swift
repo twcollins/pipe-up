@@ -1,5 +1,5 @@
+import AppKit
 import CoreAudio
-import Foundation
 
 /// Thin helpers around the CoreAudio HAL for the default input device.
 enum CoreAudioDevice {
@@ -70,6 +70,72 @@ enum CoreAudioDevice {
         var v: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
         return AudioObjectGetPropertyData(id, &a, 0, nil, &size, &v) == noErr && v != 0
+    }
+
+    // MARK: Diagnostics info
+
+    static func transportName(_ id: AudioDeviceID) -> String {
+        var a = addr(kAudioDevicePropertyTransportType)
+        var t: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(id, &a, 0, nil, &size, &t) == noErr else { return "Unknown" }
+        switch t {
+        case kAudioDeviceTransportTypeBuiltIn: return "Built-in"
+        case kAudioDeviceTransportTypeUSB: return "USB"
+        case kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE: return "Bluetooth"
+        case kAudioDeviceTransportTypeAggregate: return "Aggregate"
+        case kAudioDeviceTransportTypeVirtual: return "Virtual"
+        case kAudioDeviceTransportTypeThunderbolt: return "Thunderbolt"
+        case kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeDisplayPort: return "Display"
+        case kAudioDeviceTransportTypeContinuityCaptureWired, kAudioDeviceTransportTypeContinuityCaptureWireless: return "iPhone (Continuity)"
+        default: return "Other"
+        }
+    }
+
+    static func nominalSampleRate(_ id: AudioDeviceID) -> Double? {
+        var a = addr(kAudioDevicePropertyNominalSampleRate)
+        var v: Float64 = 0
+        var size = UInt32(MemoryLayout<Float64>.size)
+        return AudioObjectGetPropertyData(id, &a, 0, nil, &size, &v) == noErr ? v : nil
+    }
+
+    /// Names of apps currently recording from any input (macOS 14+), excluding us.
+    static func appsUsingMic() -> [String]? {
+        guard #available(macOS 14.0, *) else { return nil }
+        let system = AudioObjectID(kAudioObjectSystemObject)
+        var a = addr(kAudioHardwarePropertyProcessObjectList)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(system, &a, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(system, &a, 0, nil, &size, &ids) == noErr else { return [] }
+        let me = ProcessInfo.processInfo.processIdentifier
+        var names: [String] = []
+        for p in ids {
+            var ra = addr(kAudioProcessPropertyIsRunningInput)
+            var running: UInt32 = 0
+            var rs = UInt32(MemoryLayout<UInt32>.size)
+            guard AudioObjectGetPropertyData(p, &ra, 0, nil, &rs, &running) == noErr, running != 0 else { continue }
+            var pa = addr(kAudioProcessPropertyPID)
+            var pid: pid_t = 0
+            var ps = UInt32(MemoryLayout<pid_t>.size)
+            AudioObjectGetPropertyData(p, &pa, 0, nil, &ps, &pid)
+            if pid == me { continue }
+            var name = NSRunningApplication(processIdentifier: pid)?.localizedName
+            if name == nil {
+                var ba = addr(kAudioProcessPropertyBundleID)
+                var bid: Unmanaged<CFString>?
+                var bs = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+                if AudioObjectGetPropertyData(p, &ba, 0, nil, &bs, &bid) == noErr, let b = bid?.takeRetainedValue() {
+                    name = b as String
+                }
+            }
+            names.append(name ?? "pid \(pid)")
+        }
+        return Array(Set(names)).sorted()
+    }
+
+    static func listenSampleRate(_ id: AudioDeviceID, _ handler: @escaping () -> Void) -> Token {
+        listen(id, addr(kAudioDevicePropertyNominalSampleRate), handler)
     }
 
     // MARK: Listeners

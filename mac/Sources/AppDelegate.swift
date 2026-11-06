@@ -15,11 +15,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return c
     }()
 
+    private lazy var diagnosticsWindow: DiagnosticsWindowController = {
+        let c = DiagnosticsWindowController()
+        c.liveText = { [weak self] in self?.diagnosticsLiveText() ?? "" }
+        c.runCheck = { [weak self] in self?.diagnoseNow() ?? Diagnosis(headline: "", findings: []) }
+        c.logLines = { [weak self] in self?.diagLog ?? [] }
+        return c
+    }()
+    private var diagnosticsWindowLoaded = false
+
+    // Diagnostics evidence
+    private var diagLog: [String] = []
+    private var lastDeviceSwitch: Date?
+    private var lastSampleRateChange: (date: Date, from: Double, to: Double)?
+    private var lastVolumeDrop: (date: Date, from: Float, to: Float, apps: [String])?
+    private var volumeAtBaseline: Float?
+    private var sampleRate: Double?
+    private var sampleRateToken: CoreAudioDevice.Token?
+    private var transport = "Unknown"
+    private var currentDiagnosis: Diagnosis?
+
     // Per-second accumulator for the history log.
     private var accSecond = 0
     private var accEnergy = 0.0, accDur = 0.0, accPeak = -200.0
     private var accSpeechSum = 0.0, accSpeechN = 0
     private var accState: HistoryRecord.State = .calibrating
+    private var accBrightSum = 0.0, accBrightN = 0
 
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
@@ -65,6 +86,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var alertSilent: Bool { flag("alertSilent", default: true) }
     private var playSound: Bool { flag("playSound", default: false) }
     private var lockVolume: Bool { flag("lockVolume", default: false) }
+    private var showCause: Bool { flag("showCause", default: false) }
+    private var causeItem: NSMenuItem!
 
     // MARK: Lifecycle
 
@@ -77,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.showHistory()
         }
         history.load { [weak self] in self?.historyWindow.refresh() }
-        history.event("app_started")
+        logEvent("app_started")
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.imagePosition = .imageLeft
@@ -85,14 +108,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = menu
         renderStatusIcon()
 
-        monitor.onLevel = { [weak self] db, dt in self?.handleLevel(db, dt) }
+        monitor.onLevel = { [weak self] db, hf, dt in self?.handleLevel(db, hf, dt) }
         monitor.onConfigurationChange = { [weak self] in self?.scheduleRestart(reason: nil) }
         defaultInputToken = CoreAudioDevice.listenDefaultInput { [weak self] in
             guard let self else { return }
             let new = CoreAudioDevice.defaultInputDevice()
             if new != self.device {
                 let name = new.map(CoreAudioDevice.name(of:)) ?? "no device"
-                self.history.event("mic_switched", name)
+                self.lastDeviceSwitch = Date()
+                self.logEvent("mic_switched", name)
                 self.scheduleRestart(reason: "Mic switched to \(name)")
             }
         }
@@ -116,7 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         monitor.stop()
-        history.event("app_quit")
+        logEvent("app_quit")
         history.flush(sync: true)
     }
 
@@ -153,13 +177,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func startAudio() {
         guard !permissionDenied else { return }
         let newDevice = CoreAudioDevice.defaultInputDevice()
-        if newDevice != device { detector.reset() }   // different mic = different normal level
+        let sameDevice = newDevice == device
+        if !sameDevice { detector.reset(); sampleRate = nil }   // different mic = different normal level
         device = newDevice
 
         volumeTokens.forEach(CoreAudioDevice.remove)
         volumeTokens = []
+        if let t = sampleRateToken { CoreAudioDevice.remove(t); sampleRateToken = nil }
         if let id = newDevice {
             deviceName = CoreAudioDevice.name(of: id)
+            transport = CoreAudioDevice.transportName(id)
+            let sr = CoreAudioDevice.nominalSampleRate(id)
+            if let old = sampleRate, let sr, old != sr, sameDevice {
+                lastSampleRateChange = (Date(), old, sr)
+                logEvent("mic_sample_rate_changed", "\(Int(old)) -> \(Int(sr)) Hz")
+                detector.reset()   // the treble measure depends on sample rate
+            }
+            sampleRate = sr
+            sampleRateToken = CoreAudioDevice.listenSampleRate(id) { [weak self] in self?.scheduleRestart(reason: nil) }
             lastVolume = CoreAudioDevice.inputVolume(id)
             muted = CoreAudioDevice.isInputMuted(id)
             volumeTokens = CoreAudioDevice.listenVolume(id) { [weak self] in self?.volumeChanged() }
@@ -188,12 +223,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if lockVolume, let locked = defaults.object(forKey: "lockedVolume") as? Float, abs(v - locked) > 0.02 {
             CoreAudioDevice.setInputVolume(id, locked)
-            history.event("input_volume_restored", "\(pct(v)) -> \(pct(locked))")
+            logEvent("input_volume_restored", "\(pct(v)) -> \(pct(locked))")
             notice("An app changed input volume to \(pct(v)) — restored \(pct(locked))")
             return
         }
         if let old = lastVolume, v < old - 0.05 {
-            history.event("input_volume_lowered", "\(pct(old)) -> \(pct(v))")
+            let apps = CoreAudioDevice.appsUsingMic() ?? []
+            lastVolumeDrop = (Date(), old, v, apps)
+            logEvent("input_volume_lowered", "\(pct(old)) -> \(pct(v))" + (apps.isEmpty ? "" : " (apps using mic: \(apps.joined(separator: ", ")))"))
             notice("Input volume lowered: \(pct(old)) → \(pct(v))")
         }
     }
@@ -202,10 +239,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Level handling / alerts
 
-    private func handleLevel(_ db: Double, _ dt: Double) {
-        detector.process(db: db, dt: dt)
+    private func handleLevel(_ db: Double, _ hfDb: Double, _ dt: Double) {
+        detector.process(db: db, hfDb: hfDb, dt: dt)
+        if detector.baseline == nil { volumeAtBaseline = nil }
+        else if volumeAtBaseline == nil { volumeAtBaseline = lastVolume }
         let state = effectiveState
-        recordHistory(db: db, dt: dt, state: state)
+        recordHistory(db: db, hfDb: hfDb, dt: dt, state: state)
 
         if state != lastState {
             if state == .quiet, playSound, Date().timeIntervalSince(lastSound) > 20 {
@@ -214,16 +253,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             if state == .quiet || state == .silent || lastState == .quiet || lastState == .silent {
                 let detail = state == .quiet ? "drop \(Int((detector.dropAmount ?? 0).rounded())) dB" : ""
-                history.event("state_\(state)", detail)
+                logEvent("state_\(state)", detail)
+            }
+            if state == .quiet {
+                updateDiagnosis()
+            } else {
+                currentDiagnosis = nil
             }
             lastState = state
+        }
+        // Evidence improves as the drop goes on (e.g. after a pause), so re-check.
+        if state == .quiet, let d = currentDiagnosis, Date().timeIntervalSince(d.time) > 3 {
+            updateDiagnosis()
         }
         updateAlertHUD(state)
     }
 
-    private enum UIState { case calibrating, ok, quiet, silent, muted }
+    private func updateDiagnosis() {
+        let previous = currentDiagnosis?.likely
+        let d = diagnoseNow()
+        currentDiagnosis = d
+        if let first = d.findings.first, first.short != previous {
+            logEvent("diagnosis", "\(first.short): \(first.text)")
+        }
+        if diagnosticsWindowLoaded { diagnosticsWindow.show(diagnosis: d) }
+    }
 
-    private func recordHistory(db: Double, dt: Double, state: LevelDetector.State) {
+    private func logEvent(_ name: String, _ detail: String = "") {
+        history.event(name, detail)
+        let tf = DateFormatter()
+        tf.dateFormat = "HH:mm:ss"
+        diagLog.append("\(tf.string(from: Date()))  \(name)\(detail.isEmpty ? "" : "  \(detail)")")
+        if diagLog.count > 300 { diagLog.removeFirst(diagLog.count - 300) }
+    }
+
+    private var micModeName: String {
+        switch AVCaptureDevice.activeMicrophoneMode {
+        case .standard: return "Standard"
+        case .voiceIsolation: return "Voice Isolation"
+        case .wideSpectrum: return "Wide Spectrum"
+        @unknown default: return "Other"
+        }
+    }
+
+    private func diagContext() -> DiagContext {
+        DiagContext(deviceName: deviceName, transport: transport, sampleRate: sampleRate,
+                    channels: monitor.channelCount, volume: lastVolume, volumeAtBaseline: volumeAtBaseline,
+                    muted: muted, micMode: micModeName, appsUsingMic: CoreAudioDevice.appsUsingMic(),
+                    lastDeviceSwitch: lastDeviceSwitch, lastSampleRateChange: lastSampleRateChange,
+                    lastVolumeDrop: lastVolumeDrop)
+    }
+
+    private func diagnoseNow() -> Diagnosis { Diagnoser.diagnose(detector, diagContext()) }
+
+    private func diagnosticsLiveText() -> String {
+        let c = diagContext(), d = detector
+        func db(_ v: Double?) -> String { v.map { String(format: "%6.1f dB", $0) } ?? "     —   " }
+        func pctOpt(_ v: Float?) -> String { v.map(pct) ?? "n/a" }
+        let rate = c.sampleRate.map { "\(Int($0)) Hz" } ?? "—"
+        let apps = c.appsUsingMic.map { $0.isEmpty ? "none" : $0.joined(separator: ", ") } ?? "needs macOS 14"
+        let state: String
+        switch effectiveState {
+        case .calibrating: state = "learning your normal level"
+        case .ok: state = "normal"
+        case .quiet: state = "LEVEL DROPPED"
+        case .silent: state = "SILENT"
+        }
+        let drop = d.dropAmount.map { String(format: "%.1f dB", $0) } ?? "—"
+        return [
+            "Mic            \(c.deviceName)  (\(c.transport), \(rate), \(c.channels) ch)",
+            "Input volume   \(pctOpt(c.volume))   when normal was learnt: \(pctOpt(c.volumeAtBaseline))   muted: \(c.muted ? "YES" : "no")",
+            "Mic mode       \(c.micMode)",
+            "Apps on mic    \(apps)",
+            "State          \(state)",
+            "",
+            "                   now        normal",
+            "Voice level    \(db(d.shortTerm))   \(db(d.baseline))     drop \(drop)",
+            "Background     \(db(d.noiseFloor))   \(db(d.baselineNoiseFloor))",
+            "Brightness     \(db(d.brightness))   \(db(d.baselineBrightness))   (treble vs overall; lower = duller)",
+        ].joined(separator: "\n")
+    }
+
+    private func recordHistory(db: Double, hfDb: Double, dt: Double, state: LevelDetector.State) {
         let sec = Int(Date().timeIntervalSince1970)
         if sec != accSecond {
             if accDur > 0 {
@@ -236,17 +347,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     baseline: d.baseline.map(Float.init),
                     threshold: d.baseline.map { Float($0 - d.dropDb) },
                     state: accState,
-                    volume: lastVolume)
+                    volume: lastVolume,
+                    noiseFloor: Float(d.noiseFloor),
+                    brightness: accBrightN > 0 ? Float(accBrightSum / Double(accBrightN)) : nil)
                 history.append(rec, device: deviceName)
             }
             accSecond = sec
             accEnergy = 0; accDur = 0; accPeak = -200; accSpeechSum = 0; accSpeechN = 0
+            accBrightSum = 0; accBrightN = 0
             accState = .calibrating
         }
         accEnergy += pow(10, db / 10) * dt
         accDur += dt
         accPeak = max(accPeak, db)
-        if detector.history.last?.speech != nil { accSpeechSum += db; accSpeechN += 1 }
+        if detector.history.last?.speech != nil {
+            accSpeechSum += db; accSpeechN += 1
+            accBrightSum += hfDb - db; accBrightN += 1
+        }
         // Keep the most severe state seen during the second.
         let s: HistoryRecord.State = state == .silent ? .silent : state == .quiet ? .quiet : state == .ok ? .ok : .calibrating
         if s.rawValue > accState.rawValue { accState = s }
@@ -267,7 +384,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch state {
         case .quiet where showHUD:
             let drop = Int((detector.dropAmount ?? dropDb).rounded())
-            text = "You've gone quiet — speak up  (−\(drop) dB)"
+            var t = "Your voice level has dropped  (−\(drop) dB)"
+            if showCause, let cause = currentDiagnosis?.likely { t += "  ·  likely: \(cause)" }
+            text = t
         case .silent where showHUD && alertSilent:
             text = muted ? "Mic is muted in macOS" : "Mic is picking up nothing — muted or disconnected?"
             color = .systemRed
@@ -327,7 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.image = img
 
         if state == .quiet {
-            button.attributedTitle = NSAttributedString(string: " Speak up", attributes: [
+            button.attributedTitle = NSAttributedString(string: " Low", attributes: [
                 .foregroundColor: NSColor.systemOrange, .font: NSFont.menuBarFont(ofSize: 0)])
         } else if !button.title.isEmpty {
             button.title = ""
@@ -346,7 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switch effectiveState {
             case .calibrating: graph.headline = "Learning your normal level — just talk"
             case .ok: graph.headline = "Sounding normal"
-            case .quiet: graph.headline = "You've gone quiet — speak up"
+            case .quiet: graph.headline = "Your voice level has dropped"
             case .silent: graph.headline = muted ? "Mic is muted" : "No signal from the mic"
             }
             var parts = ["Now \(Int(d.level.rounded())) dB"]
@@ -422,8 +541,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hudItem.state = showHUD ? .on : .off
         silentItem = item("Alert when the mic goes silent", #selector(toggleSilent))
         silentItem.state = alertSilent ? .on : .off
-        soundItem = item("Play a sound when I go quiet", #selector(toggleSound))
+        soundItem = item("Play a sound when my level drops", #selector(toggleSound))
         soundItem.state = playSound ? .on : .off
+
+        let expert = NSMenuItem(title: "Expert", action: nil, keyEquivalent: "")
+        let expertMenu = NSMenu()
+        let diag = NSMenuItem(title: "Diagnostics: why did my level drop?…", action: #selector(showDiagnostics), keyEquivalent: "d")
+        diag.target = self
+        expertMenu.addItem(diag)
+        causeItem = NSMenuItem(title: "Show likely cause in alerts", action: #selector(toggleCause), keyEquivalent: "")
+        causeItem.target = self
+        causeItem.state = showCause ? .on : .off
+        expertMenu.addItem(causeItem)
+        expert.submenu = expertMenu
+        menu.addItem(expert)
 
         menu.addItem(.separator())
         loginItem = item("Open at login", #selector(toggleLogin))
@@ -470,10 +601,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func showHistoryAction() { showHistory() }
+
+    @objc private func showDiagnostics() {
+        diagnosticsWindowLoaded = true
+        diagnosticsWindow.show()
+        if let d = currentDiagnosis { diagnosticsWindow.show(diagnosis: d) }
+    }
+
+    @objc private func toggleCause() {
+        defaults.set(!showCause, forKey: "showCause")
+        causeItem.state = showCause ? .on : .off
+    }
     @objc private func openDataFolderAction() { openDataFolder() }
 
     @objc private func recalibrate() {
-        history.event("relearn_normal_level")
+        logEvent("relearn_normal_level")
         detector.reset()
         notice("Re-learning your normal level — just talk normally")
     }

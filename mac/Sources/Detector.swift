@@ -37,6 +37,15 @@ final class LevelDetector {
     private(set) var baseline: Double?
     private(set) var shortTerm: Double?
     private(set) var history: [Sample] = []
+
+    // Diagnostics: what the background and your voice's "brightness" (treble
+    // relative to overall level) looked like when your normal level was learnt.
+    private(set) var baselineNoiseFloor: Double?
+    private(set) var brightness: Double?          // short-term, speech only (dB)
+    private(set) var baselineBrightness: Double?
+    /// Seconds since the last pause (non-speech frame). The background-noise
+    /// estimate is only trustworthy if there has been a recent pause.
+    private(set) var sincePause: Double = .infinity
     let historyLength = 700   // ~60 s at ~85 ms per frame
 
     /// How far below baseline the current speech is (positive = quieter).
@@ -51,6 +60,8 @@ final class LevelDetector {
     private var sinceSpeech: Double = .infinity
     private var quietFor: Double = 0
     private var silentFor: Double = 0
+    private var calibrationBright: Double = 0
+    private var calibrationBrightN: Double = 0
 
     func reset() {
         state = .calibrating
@@ -62,13 +73,20 @@ final class LevelDetector {
         quietFor = 0
         silentFor = 0
         sinceSpeech = .infinity
+        baselineNoiseFloor = nil
+        brightness = nil
+        baselineBrightness = nil
+        calibrationBright = 0
+        calibrationBrightN = 0
     }
 
     private func ema(_ old: Double, _ new: Double, dt: Double, tau: Double) -> Double {
         old + (new - old) * (1 - exp(-dt / tau))
     }
 
-    func process(db: Double, dt: Double) {
+    /// - Parameter hfDb: level of the high-frequency part of the signal (dBFS),
+    ///   used to spot a muffled / turned-away mic. Optional.
+    func process(db: Double, hfDb: Double? = nil, dt: Double) {
         level = db
 
         // Noise floor: fast down, slow up (0.3 dB/s). Digital silence (muted /
@@ -88,12 +106,17 @@ final class LevelDetector {
             sinceSpeech = 0
             speechSeconds += dt
             shortTerm = shortTerm.map { ema($0, db, dt: dt, tau: 1.5) } ?? db
+            let bright = hfDb.map { $0 - db }
+            if let bright { brightness = brightness.map { ema($0, bright, dt: dt, tau: 1.5) } ?? bright }
 
             if baseline == nil {
                 calibrationSum += db
                 calibrationN += 1
+                if let bright { calibrationBright += bright; calibrationBrightN += 1 }
                 if speechSeconds >= calibrationSpeechSeconds {
                     baseline = calibrationSum / calibrationN
+                    baselineNoiseFloor = noiseFloor
+                    if calibrationBrightN > 0 { baselineBrightness = calibrationBright / calibrationBrightN }
                 }
             } else if var b = baseline {
                 // Adapt slowly; much more slowly while quiet so the baseline
@@ -101,9 +124,14 @@ final class LevelDetector {
                 let tau = state == .quiet ? 400.0 : 45.0
                 b = ema(b, db, dt: dt, tau: tau)
                 baseline = b
+                if let bright, let bb = baselineBrightness {
+                    baselineBrightness = ema(bb, bright, dt: dt, tau: tau)
+                }
             }
+            sincePause += dt
         } else {
             sinceSpeech += dt
+            if db >= -100 { sincePause = 0 }
         }
 
         // Silence: real mics always have some self-noise well above -100 dBFS.
@@ -129,6 +157,11 @@ final class LevelDetector {
             state = .quiet
         } else {
             state = .ok
+        }
+
+        // Track the "normal" background only while things are normal.
+        if state == .ok, let nb = baselineNoiseFloor {
+            baselineNoiseFloor = ema(nb, noiseFloor, dt: dt, tau: 120)
         }
 
         history.append(Sample(db: db, speech: isSpeech ? shortTerm : nil))

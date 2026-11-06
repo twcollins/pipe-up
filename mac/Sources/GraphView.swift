@@ -4,7 +4,7 @@ import AppKit
 ///  grey bars   = raw level
 ///  blue line   = your speaking level (short-term)
 ///  dashed line = your normal level (baseline)
-///  orange line = the "you've gone quiet" threshold
+///  orange line = the "level dropped" threshold
 final class GraphView: NSView {
     weak var detector: LevelDetector?
     var headline = ""

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pipe Up</title>
-<meta name="description" content="Watches your microphone level and tells you when you've gone quiet. Runs entirely in your browser — nothing is recorded or sent anywhere.">
+<meta name="description" content="Helps you catch when your voice goes low or quiet on a call. Runs entirely in your browser — nothing is recorded or sent anywhere.">
 <link id="favicon" rel="icon" href="data:,">
 <style>
   :root {
@@ -62,6 +62,12 @@
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
   .w-head { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .w-db { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  .w-cause { font-size: 12px; color: var(--muted); margin: -4px 0 8px 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .w-cause:empty { display: none; }
+  pre.diag { font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--surface-2);
+             border-radius: 8px; padding: 10px 12px; margin: 10px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .diag-out { margin: 10px 0 0; }
+  .diag-out p { margin: 4px 0; }
   .meter { position: relative; height: 12px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
   .meter-fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ok); border-radius: 6px; transition: width .08s linear; }
   .tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; display: none; }
@@ -89,7 +95,7 @@
 <body>
 <main>
   <h1>Pipe Up</h1>
-  <p class="lede">Learns how loud you normally sound and warns you when your mic level drops, so you know to speak up. Everything runs in this tab. Nothing is recorded or sent anywhere.</p>
+  <p class="lede">Learns how your voice normally sounds through your mic and shows you when your level drops, so you can catch it as it happens. Everything runs in this tab. Nothing is recorded or sent anywhere.</p>
 
   <section id="startCard" class="card">
     <div class="row">
@@ -107,6 +113,7 @@
           <span class="w-head" id="wHead">Learning your normal level, just talk</span>
           <span class="w-db" id="wDb">— dB</span>
         </div>
+        <div class="w-cause" id="wCause"></div>
         <div class="meter">
           <div class="meter-fill" id="mFill"></div>
           <div class="tick thr" id="mThr"></div>
@@ -149,9 +156,20 @@
       </div>
       <div style="margin-top: 10px;">
         <label class="check"><input type="checkbox" id="optSilent"> Alert when the mic goes completely silent</label>
-        <label class="check"><input type="checkbox" id="optNotify"> Desktop notification when I go quiet</label>
-        <label class="check"><input type="checkbox" id="optBeep"> Soft beep when I go quiet (best with headphones)</label>
+        <label class="check"><input type="checkbox" id="optNotify"> Desktop notification when my level drops</label>
+        <label class="check"><input type="checkbox" id="optBeep"> Soft beep when my level drops (best with headphones)</label>
+        <label class="check"><input type="checkbox" id="optExpert"> Expert: diagnose why my level dropped</label>
       </div>
+    </div>
+
+    <div class="card hidden" id="diagCard">
+      <div class="row" style="justify-content: space-between;">
+        <strong>Diagnostics</strong>
+        <button id="diagBtn">Check now</button>
+      </div>
+      <pre class="diag" id="diagLive"></pre>
+      <div class="diag-out" id="diagOut"><p class="small">Any drop is analysed automatically. Click <b>Check now</b> to analyse your current level.</p></div>
+      <p class="small">The browser can't see your computer's input volume setting or which apps are using the mic. The Mac app can.</p>
     </div>
   </section>
 
@@ -159,9 +177,10 @@
     <summary>How it works and tips</summary>
     <ul>
       <li>For the first ~10 seconds of talking it learns your normal speaking level. Click <b>Re-learn</b> if you change mic or position.</li>
-      <li>If your speaking level stays well below normal for a couple of seconds, the widget turns orange and the tab title changes to "Speak up".</li>
+      <li>If your speaking level stays well below normal for a couple of seconds, the widget turns orange and the tab title changes to "Level dropped".</li>
       <li>It reads the raw mic signal with the browser's echo cancellation, noise suppression and auto-gain turned off, so it sees what your mic actually picks up.</li>
       <li>Common causes of sudden quietness: a headset or AirPods taking over as the mic, a meeting app's auto-gain lowering your input volume, or turning your head away from a laptop mic.</li>
+      <li><b>Expert diagnostics</b> compares the background noise and the treble in your voice with normal. If both your voice and the background drop, the gain went down (input volume, auto-gain, a gain knob). If only your voice drops, you moved away or are talking softer. If your voice loses treble, the mic is covered or pointing away.</li>
       <li>The pop-out mini window needs Chrome or Edge. Other browsers get a normal small window instead.</li>
     </ul>
   </details>
@@ -174,7 +193,7 @@
   // document.getElementById would no longer find it.
   const cache = {};
   const $ = (id) => cache[id] || (cache[id] = document.getElementById(id));
-  ["widget", "wHead", "wDb", "mFill", "mBase", "mThr"].forEach($);
+  ["widget", "wHead", "wDb", "wCause", "mFill", "mBase", "mThr"].forEach($);
 
   // ---------- settings ----------
   const store = {
@@ -187,6 +206,7 @@
     notify: store.get("notify", false),
     beep: store.get("beep", false),
     device: store.get("device", ""),
+    expert: store.get("expert", false),
   };
 
   // ---------- detector (same algorithm as the Mac app) ----------
@@ -196,10 +216,13 @@
       this.state = "calibrating"; this.baseline = null; this.shortTerm = null;
       this.speechSeconds = 0; this.calSum = 0; this.calN = 0;
       this.sinceSpeech = Infinity; this.quietFor = 0; this.silentFor = 0;
+      this.baselineNoiseFloor = null; this.brightness = null; this.baselineBrightness = null;
+      this.calBright = 0; this.calBrightN = 0; this.sincePause = Infinity;
     }
     static ema(o, n, dt, tau) { return o + (n - o) * (1 - Math.exp(-dt / tau)); }
     get dropAmount() { return this.baseline == null || this.shortTerm == null ? null : this.baseline - this.shortTerm; }
-    process(db, dt) {
+    // hfDb: level of the high-frequency content (first difference), for spotting a muffled mic.
+    process(db, hfDb, dt) {
       const E = Detector.ema;
       this.level = db;
       if (db >= -100) {
@@ -212,13 +235,22 @@
       if (isSpeech) {
         this.sinceSpeech = 0; this.speechSeconds += dt;
         this.shortTerm = this.shortTerm == null ? db : E(this.shortTerm, db, dt, 1.5);
+        const bright = hfDb - db;
+        this.brightness = this.brightness == null ? bright : E(this.brightness, bright, dt, 1.5);
         if (this.baseline == null) {
-          this.calSum += db; this.calN++;
-          if (this.speechSeconds >= 8) this.baseline = this.calSum / this.calN;
+          this.calSum += db; this.calN++; this.calBright += bright; this.calBrightN++;
+          if (this.speechSeconds >= 8) {
+            this.baseline = this.calSum / this.calN;
+            this.baselineNoiseFloor = this.noiseFloor;
+            this.baselineBrightness = this.calBright / this.calBrightN;
+          }
         } else {
-          this.baseline = E(this.baseline, db, dt, this.state === "quiet" ? 400 : 45);
+          const tau = this.state === "quiet" ? 400 : 45;
+          this.baseline = E(this.baseline, db, dt, tau);
+          this.baselineBrightness = E(this.baselineBrightness, bright, dt, tau);
         }
-      } else this.sinceSpeech += dt;
+        this.sincePause += dt;
+      } else { this.sinceSpeech += dt; if (db >= -100) this.sincePause = 0; }
 
       this.silentFor = db < -100 ? this.silentFor + dt : 0;
 
@@ -232,9 +264,65 @@
         : this.baseline == null ? "calibrating"
         : this.quietFor >= 2 ? "quiet" : "ok";
 
+      if (this.state === "ok" && this.baselineNoiseFloor != null) this.baselineNoiseFloor = E(this.baselineNoiseFloor, this.noiseFloor, dt, 120);
       this.history.push({ db, speech: isSpeech ? this.shortTerm : null });
       if (this.history.length > this.historyLength) this.history.shift();
     }
+  }
+
+  // Same reasoning as the Mac app's Diagnoser (mac/Sources/Diagnostics.swift).
+  let lastSwitch = null;
+  function diagnose() {
+    const f = [], drop = det.dropAmount, r = (v) => Math.round(v);
+    if (lastSwitch && Date.now() - lastSwitch.time < 120000)
+      f.push(["mic switched", `The mic switched to ${lastSwitch.label} ${r((Date.now() - lastSwitch.time) / 1000)}s ago. Different mics have different levels.`]);
+    let acoustic = false;
+    if (drop != null && drop > 2 && det.sincePause > 4) {
+      f.push(["unclear (no pause yet)", "You haven't paused since the drop, so the background can't be measured yet. Pause briefly and check again."]);
+    } else if (drop != null && drop > 2 && det.baselineNoiseFloor != null) {
+      const nfDrop = det.baselineNoiseFloor - det.noiseFloor;
+      if (nfDrop >= Math.max(3, 0.5 * drop))
+        f.push(["gain dropped", `Background noise fell ${r(nfDrop)} dB along with your voice (${r(drop)} dB). The whole signal got quieter, so something reduced the gain: your computer's input volume, a meeting app's auto-gain, a gain knob on a headset, or a different mic.`]);
+      else if (nfDrop <= -4)
+        f.push(["louder background", `Background noise is ${r(-nfDrop)} dB louder than normal, so your voice stands out less.`]);
+      else if (Math.abs(nfDrop) < 3) acoustic = true;
+      else f.push(["gain + distance", `Background noise fell ${r(nfDrop)} dB but your voice fell more (${r(drop)} dB). Probably a mix: some gain reduction plus being further from the mic or speaking more softly.`]);
+    }
+    if (det.baselineBrightness != null && det.brightness != null && det.baselineBrightness - det.brightness >= 3 && (drop || 0) > 2)
+      f.push(["mic muffled / turned away", `Your voice has lost ${r(det.baselineBrightness - det.brightness)} dB of treble compared with normal. The mic is probably pointing away from your mouth or is covered (hand, clothing, mask, or a moved headset boom).`]);
+    if (acoustic)
+      f.push(["further from mic / softer", `Background noise is unchanged but your voice is ${r(drop)} dB quieter. That points to an acoustic change: you're further from the mic, facing away, or speaking more softly.`]);
+    const headline = det.baseline == null ? "Still learning your normal level. Talk for a few more seconds."
+      : drop != null && drop > 2 ? `Your voice is ${r(drop)} dB below your normal level.`
+      : "Your level is normal right now (within 2 dB).";
+    if (!f.length && drop != null && drop > 2) f.push(["unclear", "No clear cause yet. Keep talking for a few seconds and check again."]);
+    return { time: new Date(), headline, findings: f, likely: f[0] ? f[0][0] : null };
+  }
+  let currentDiagnosis = null;
+
+  function renderDiagnosis(d) {
+    const out = $("diagOut");
+    out.innerHTML = "";
+    const h = document.createElement("p");
+    h.innerHTML = `<b></b>`;
+    h.firstChild.textContent = `[${d.time.toLocaleTimeString()}] ${d.headline}`;
+    out.append(h);
+    d.findings.forEach(([, text], i) => {
+      const p = document.createElement("p");
+      p.textContent = `${i === 0 ? "Most likely" : "Also"}: ${text}`;
+      out.append(p);
+    });
+  }
+
+  function renderDiagLive() {
+    const n = (v) => v == null ? "     —   " : (v.toFixed(1) + " dB").padStart(9);
+    $("diagLive").textContent = [
+      `Mic          ${currentLabel || "—"}`,
+      `                  now        normal`,
+      `Voice level  ${n(det.shortTerm)}   ${n(det.baseline)}    drop ${det.dropAmount == null ? "—" : det.dropAmount.toFixed(1) + " dB"}`,
+      `Background   ${n(det.noiseFloor)}   ${n(det.baselineNoiseFloor)}`,
+      `Brightness   ${n(det.brightness)}   ${n(det.baselineBrightness)}   (treble vs overall; lower = duller)`,
+    ].join("\n");
   }
 
   const det = new Detector();
@@ -244,21 +332,24 @@
   // RMS is computed on the audio thread so it keeps working in a background tab.
   const WORKLET = `
     class Meter extends AudioWorkletProcessor {
-      constructor() { super(); this.sums = []; this.n = 0; this.target = Math.round(sampleRate * 0.1); }
+      constructor() { super(); this.sums = []; this.hf = []; this.prev = []; this.n = 0; this.target = Math.round(sampleRate * 0.1); }
       process(inputs) {
         const inp = inputs[0];
         if (!inp || !inp.length) return true;
         const len = inp[0].length;
         for (let c = 0; c < inp.length; c++) {
-          const ch = inp[c]; let s = 0;
-          for (let i = 0; i < len; i++) s += ch[i] * ch[i];
+          const ch = inp[c]; let s = 0, h = 0, p = this.prev[c] || 0;
+          for (let i = 0; i < len; i++) { const x = ch[i], d = x - p; s += x * x; h += d * d; p = x; }
+          this.prev[c] = p;
           this.sums[c] = (this.sums[c] || 0) + s;
+          this.hf[c] = (this.hf[c] || 0) + h;
         }
         this.n += len;
         if (this.n >= this.target) {
-          const best = Math.max(...this.sums.slice(0, inp.length));
-          this.port.postMessage({ ms: best / this.n, dt: this.n / sampleRate });
-          this.sums = []; this.n = 0;
+          let bc = 0;
+          for (let c = 1; c < inp.length; c++) if (this.sums[c] > this.sums[bc]) bc = c;
+          this.port.postMessage({ ms: this.sums[bc] / this.n, hs: this.hf[bc] / this.n, dt: this.n / sampleRate });
+          this.sums = []; this.hf = []; this.n = 0;
         }
         return true;
       }
@@ -300,6 +391,7 @@
     const newLabel = track.label;
     if (currentLabel && newLabel !== currentLabel) {
       det.reset();
+      lastSwitch = { time: Date.now(), label: newLabel };
       showNotice(`Mic switched to ${newLabel}. Re-learning your normal level.`);
     }
     currentLabel = newLabel;
@@ -315,13 +407,13 @@
       const chans = Math.max(1, Math.min(source.channelCount || 1, 8));
       meter = ctx.createScriptProcessor(4096, chans, 1);
       meter.onaudioprocess = (e) => {
-        const ib = e.inputBuffer; let best = 0;
+        const ib = e.inputBuffer; let best = 0, bestHf = 0;
         for (let c = 0; c < ib.numberOfChannels; c++) {
-          const d = ib.getChannelData(c); let s = 0;
-          for (let i = 0; i < d.length; i++) s += d[i] * d[i];
-          if (s > best) best = s;
+          const d = ib.getChannelData(c); let s = 0, h = 0;
+          for (let i = 0; i < d.length; i++) { s += d[i] * d[i]; if (i) { const df = d[i] - d[i - 1]; h += df * df; } }
+          if (s > best) { best = s; bestHf = h; }
         }
-        onFrame({ ms: best / ib.length, dt: ib.length / ib.sampleRate });
+        onFrame({ ms: best / ib.length, hs: bestHf / ib.length, dt: ib.length / ib.sampleRate });
       };
       source.connect(meter);
       meter.connect(ctx.destination);  // outputs silence; needed for it to run
@@ -366,9 +458,10 @@
   // ---------- per-frame ----------
   let lastState = null, lastNotify = 0, lastBeep = 0;
 
-  function onFrame({ ms, dt }) {
+  function onFrame({ ms, hs, dt }) {
     const db = 10 * Math.log10(Math.max(ms, 1e-14));
-    det.process(db, dt);
+    const hfDb = 10 * Math.log10(Math.max(hs || 0, 1e-14));
+    det.process(db, hfDb, dt);
     let state = det.state;
     if (state === "silent" && !settings.silent) state = det.baseline == null ? "calibrating" : "ok";
 
@@ -376,18 +469,27 @@
       onStateChange(state, lastState);
       lastState = state;
     }
+    // Evidence improves as the drop goes on (e.g. after a pause), so re-check.
+    if (state === "quiet" && currentDiagnosis && Date.now() - currentDiagnosis.time > 3000) {
+      currentDiagnosis = diagnose();
+      if (settings.expert) renderDiagnosis(currentDiagnosis);
+    }
     renderWidget(state);
-    if (!document.hidden) drawGraph();
+    if (!document.hidden) { drawGraph(); if (settings.expert) renderDiagLive(); }
   }
 
   function onStateChange(state) {
-    const titles = { quiet: "🟠 Speak up · Pipe Up", silent: "🔴 No mic signal · Pipe Up" };
+    const titles = { quiet: "🟠 Level dropped · Pipe Up", silent: "🔴 No mic signal · Pipe Up" };
     document.title = titles[state] || "Pipe Up";
     setFavicon(state);
     const now = Date.now();
     if (state === "quiet") {
+      currentDiagnosis = diagnose();
+      if (settings.expert) renderDiagnosis(currentDiagnosis);
+    } else currentDiagnosis = null;
+    if (state === "quiet") {
       if (settings.notify && "Notification" in window && Notification.permission === "granted" && now - lastNotify > 30000) {
-        try { new Notification("You've gone quiet", { body: "Your mic level has dropped. Speak up or move closer.", tag: "pipe-up", silent: true }); } catch {}
+        try { new Notification("Your voice level has dropped", { body: (settings.expert && currentDiagnosis?.likely ? `Likely: ${currentDiagnosis.likely}. ` : "") + "You're quieter than your normal level.", tag: "pipe-up", silent: true }); } catch {}
         lastNotify = now;
       }
       if (settings.beep && now - lastBeep > 20000) { beep(); lastBeep = now; }
@@ -397,7 +499,7 @@
   const HEAD = {
     calibrating: "Learning your normal level, just talk",
     ok: "Sounding normal",
-    quiet: "You've gone quiet. Speak up",
+    quiet: "Your voice level has dropped",
     silent: "No signal. Muted or unplugged?",
   };
 
@@ -409,6 +511,8 @@
     const head = state === "quiet" && det.dropAmount != null
       ? `${HEAD.quiet} (−${Math.round(det.dropAmount)} dB)` : HEAD[state];
     if ($("wHead").textContent !== head) $("wHead").textContent = head;
+    const cause = settings.expert && state === "quiet" && currentDiagnosis?.likely ? `Likely: ${currentDiagnosis.likely}` : "";
+    if ($("wCause").textContent !== cause) $("wCause").textContent = cause;
     $("wDb").textContent = `${Math.round(det.level)} dB`;
     $("mFill").style.width = pct(det.level) + "%";
     const showTicks = det.baseline != null;
@@ -517,6 +621,8 @@
   $("optSilent").checked = settings.silent;
   $("optNotify").checked = settings.notify;
   $("optBeep").checked = settings.beep;
+  $("optExpert").checked = settings.expert;
+  $("diagCard").classList.toggle("hidden", !settings.expert);
 
   $("startBtn").addEventListener("click", async () => {
     $("startError").textContent = "";
@@ -540,6 +646,12 @@
   $("devSel").addEventListener("change", (e) => { settings.device = e.target.value; store.set("device", settings.device); det.reset(); scheduleRestart(); });
   $("sensSel").addEventListener("change", (e) => { settings.dropDb = det.dropDb = Number(e.target.value); store.set("dropDb", settings.dropDb); });
   $("optSilent").addEventListener("change", (e) => { settings.silent = e.target.checked; store.set("silent", settings.silent); });
+  $("optExpert").addEventListener("change", (e) => {
+    settings.expert = e.target.checked; store.set("expert", settings.expert);
+    $("diagCard").classList.toggle("hidden", !settings.expert);
+    if (settings.expert) renderDiagLive();
+  });
+  $("diagBtn").addEventListener("click", () => renderDiagnosis(diagnose()));
   $("optBeep").addEventListener("change", (e) => { settings.beep = e.target.checked; store.set("beep", settings.beep); if (settings.beep) beep(); });
   $("optNotify").addEventListener("change", async (e) => {
     settings.notify = e.target.checked;
