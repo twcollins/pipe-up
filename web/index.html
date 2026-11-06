@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mic Helper</title>
+<meta name="description" content="Watches your microphone level and tells you when you've gone quiet. Runs entirely in your browser — nothing is recorded or sent anywhere.">
+<link id="favicon" rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --surface-2: #eef0f3; --border: #dde1e6;
+    --text: #15181c; --muted: #5d6670; --accent: #2f6fe4; --accent-text: #ffffff;
+    --ok: #1f9d55; --warn: #e07b00; --bad: #d93a3a; --bar: #c4cad1;
+    --warn-bg: #fff1dd; --bad-bg: #fde6e6;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111316; --surface: #1a1d21; --surface-2: #23272c; --border: #2e333a;
+      --text: #e9ecef; --muted: #9aa3ad; --accent: #5b8ff0; --accent-text: #0b0d10;
+      --ok: #3ccf7c; --warn: #ffa53a; --bad: #ff6b6b; --bar: #3a4048;
+      --warn-bg: #3a2a12; --bad-bg: #3c1c1c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #111316; --surface: #1a1d21; --surface-2: #23272c; --border: #2e333a;
+    --text: #e9ecef; --muted: #9aa3ad; --accent: #5b8ff0; --accent-text: #0b0d10;
+    --ok: #3ccf7c; --warn: #ffa53a; --bad: #ff6b6b; --bar: #3a4048;
+    --warn-bg: #3a2a12; --bad-bg: #3c1c1c;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 640px; margin: 0 auto; padding: 28px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  button, select {
+    font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 12px; cursor: pointer;
+  }
+  button:hover { filter: brightness(0.97); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: transparent; font-weight: 600; }
+  button.big { padding: 11px 18px; font-size: 16px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .hidden { display: none !important; }
+  .small { font-size: 13px; color: var(--muted); }
+  label.check { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+  .grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
+  .grid select { width: 100%; min-width: 0; }
+
+  /* ---- The compact widget (also what goes into the pop-out window) ---- */
+  .widget {
+    border-radius: 12px; padding: 12px 14px; background: var(--surface);
+    border: 1px solid var(--border); transition: background .25s, border-color .25s;
+  }
+  .w-row { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+  .w-head { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .w-db { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  .meter { position: relative; height: 12px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+  .meter-fill { position: absolute; inset: 0 auto 0 0; width: 0; background: var(--ok); border-radius: 6px; transition: width .08s linear; }
+  .tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; display: none; }
+  .tick.base { background: var(--text); opacity: .55; }
+  .tick.thr { background: var(--warn); }
+  .widget[data-state="ok"] .dot { background: var(--ok); }
+  .widget[data-state="calibrating"] .dot { background: var(--accent); }
+  .widget[data-state="quiet"] { background: var(--warn-bg); border-color: var(--warn); }
+  .widget[data-state="quiet"] .dot, .widget[data-state="quiet"] .meter-fill { background: var(--warn); }
+  .widget[data-state="silent"] { background: var(--bad-bg); border-color: var(--bad); }
+  .widget[data-state="silent"] .dot { background: var(--bad); }
+
+  /* Pop-out window: widget fills it */
+  body.mini { background: var(--surface); }
+  body.mini .widget { border: 0; border-radius: 0; min-height: 100vh; padding: 12px 14px; display: flex; flex-direction: column; justify-content: center; }
+
+  canvas { width: 100%; height: 120px; display: block; border-radius: 8px; background: var(--surface-2); }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; }
+  .legend span::before { content: ""; display: inline-block; width: 12px; height: 3px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+  details summary { cursor: pointer; font-weight: 600; }
+  details p, details li { color: var(--muted); }
+  .notice { margin-top: 10px; font-size: 13px; color: var(--accent); min-height: 1.2em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Mic Helper</h1>
+  <p class="lede">Learns how loud you normally sound and warns you when your mic level drops, so you know to speak up. Everything runs in this tab. Nothing is recorded or sent anywhere.</p>
+
+  <section id="startCard" class="card">
+    <div class="row">
+      <button id="startBtn" class="primary big">Start listening</button>
+      <span class="small">Your browser will ask for microphone access.</span>
+    </div>
+    <p id="startError" class="small" style="color: var(--bad)"></p>
+  </section>
+
+  <section id="app" class="hidden">
+    <div id="widgetHome" class="card" style="padding: 0; border: 0; background: none;">
+      <div id="widget" class="widget" data-state="calibrating">
+        <div class="w-row">
+          <span class="dot"></span>
+          <span class="w-head" id="wHead">Learning your normal level, just talk</span>
+          <span class="w-db" id="wDb">— dB</span>
+        </div>
+        <div class="meter">
+          <div class="meter-fill" id="mFill"></div>
+          <div class="tick thr" id="mThr"></div>
+          <div class="tick base" id="mBase"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <button id="popBtn" class="primary">Pop out mini window</button>
+        <button id="recalBtn">Re-learn my normal level</button>
+      </div>
+      <p class="small" id="popHint" style="margin: 8px 0 0;">The mini window stays on top of Zoom, Teams or Meet. Keep this tab open.</p>
+      <div class="notice" id="notice"></div>
+    </div>
+
+    <div class="card">
+      <canvas id="graph"></canvas>
+      <div class="legend small">
+        <span style="--c: var(--bar)">Mic level</span>
+        <span style="--c: var(--accent)">Your speaking level</span>
+        <span style="--c: var(--text)">Your normal</span>
+        <span style="--c: var(--warn)">Alert line</span>
+      </div>
+      <p class="small" id="stats" style="margin: 6px 0 0;"></p>
+    </div>
+
+    <div class="card">
+      <div class="grid">
+        <label for="devSel">Microphone</label>
+        <select id="devSel"><option value="">System default</option></select>
+        <label for="sensSel">Alert when quieter by</label>
+        <select id="sensSel">
+          <option value="6">6 dB (very sensitive)</option>
+          <option value="8">8 dB (default)</option>
+          <option value="10">10 dB</option>
+          <option value="12">12 dB (big drops only)</option>
+        </select>
+      </div>
+      <div style="margin-top: 10px;">
+        <label class="check"><input type="checkbox" id="optSilent"> Alert when the mic goes completely silent</label>
+        <label class="check"><input type="checkbox" id="optNotify"> Desktop notification when I go quiet</label>
+        <label class="check"><input type="checkbox" id="optBeep"> Soft beep when I go quiet (best with headphones)</label>
+      </div>
+    </div>
+  </section>
+
+  <details class="card">
+    <summary>How it works and tips</summary>
+    <ul>
+      <li>For the first ~10 seconds of talking it learns your normal speaking level. Click <b>Re-learn</b> if you change mic or position.</li>
+      <li>If your speaking level stays well below normal for a couple of seconds, the widget turns orange and the tab title changes to "Speak up".</li>
+      <li>It reads the raw mic signal with the browser's echo cancellation, noise suppression and auto-gain turned off, so it sees what your mic actually picks up.</li>
+      <li>Common causes of sudden quietness: a headset or AirPods taking over as the mic, a meeting app's auto-gain lowering your input volume, or turning your head away from a laptop mic.</li>
+      <li>The pop-out mini window needs Chrome or Edge. Other browsers get a normal small window instead.</li>
+    </ul>
+  </details>
+</main>
+
+<script>
+(() => {
+  "use strict";
+  // Cache lookups: the widget moves into the pop-out window's document, where
+  // document.getElementById would no longer find it.
+  const cache = {};
+  const $ = (id) => cache[id] || (cache[id] = document.getElementById(id));
+  ["widget", "wHead", "wDb", "mFill", "mBase", "mThr"].forEach($);
+
+  // ---------- settings ----------
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("mh." + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+    set(k, v) { try { localStorage.setItem("mh." + k, JSON.stringify(v)); } catch {} },
+  };
+  const settings = {
+    dropDb: store.get("dropDb", 8),
+    silent: store.get("silent", true),
+    notify: store.get("notify", false),
+    beep: store.get("beep", false),
+    device: store.get("device", ""),
+  };
+
+  // ---------- detector (same algorithm as the Mac app) ----------
+  class Detector {
+    constructor() { this.dropDb = 8; this.noiseFloor = -60; this.level = -100; this.history = []; this.historyLength = 600; this.reset(); }
+    reset() {
+      this.state = "calibrating"; this.baseline = null; this.shortTerm = null;
+      this.speechSeconds = 0; this.calSum = 0; this.calN = 0;
+      this.sinceSpeech = Infinity; this.quietFor = 0; this.silentFor = 0;
+    }
+    static ema(o, n, dt, tau) { return o + (n - o) * (1 - Math.exp(-dt / tau)); }
+    get dropAmount() { return this.baseline == null || this.shortTerm == null ? null : this.baseline - this.shortTerm; }
+    process(db, dt) {
+      const E = Detector.ema;
+      this.level = db;
+      if (db >= -100) {
+        if (db < this.noiseFloor) this.noiseFloor = E(this.noiseFloor, db, dt, 0.5);
+        else this.noiseFloor += Math.min(db - this.noiseFloor, 0.3 * dt);
+      }
+      this.noiseFloor = Math.min(Math.max(this.noiseFloor, -110), -35);
+
+      const isSpeech = db > Math.max(this.noiseFloor + 9, -70);
+      if (isSpeech) {
+        this.sinceSpeech = 0; this.speechSeconds += dt;
+        this.shortTerm = this.shortTerm == null ? db : E(this.shortTerm, db, dt, 1.5);
+        if (this.baseline == null) {
+          this.calSum += db; this.calN++;
+          if (this.speechSeconds >= 8) this.baseline = this.calSum / this.calN;
+        } else {
+          this.baseline = E(this.baseline, db, dt, this.state === "quiet" ? 400 : 45);
+        }
+      } else this.sinceSpeech += dt;
+
+      this.silentFor = db < -100 ? this.silentFor + dt : 0;
+
+      if (this.baseline != null && this.shortTerm != null && this.sinceSpeech < 1) {
+        const thr = this.baseline - this.dropDb;
+        if (this.shortTerm < thr) this.quietFor += dt;
+        else if (this.shortTerm > thr + 2) this.quietFor = 0;
+      } else if (this.sinceSpeech > 6) this.quietFor = 0;
+
+      this.state = this.silentFor > 3 ? "silent"
+        : this.baseline == null ? "calibrating"
+        : this.quietFor >= 2 ? "quiet" : "ok";
+
+      this.history.push({ db, speech: isSpeech ? this.shortTerm : null });
+      if (this.history.length > this.historyLength) this.history.shift();
+    }
+  }
+
+  const det = new Detector();
+  det.dropDb = settings.dropDb;
+
+  // ---------- audio ----------
+  // RMS is computed on the audio thread so it keeps working in a background tab.
+  const WORKLET = `
+    class Meter extends AudioWorkletProcessor {
+      constructor() { super(); this.sums = []; this.n = 0; this.target = Math.round(sampleRate * 0.1); }
+      process(inputs) {
+        const inp = inputs[0];
+        if (!inp || !inp.length) return true;
+        const len = inp[0].length;
+        for (let c = 0; c < inp.length; c++) {
+          const ch = inp[c]; let s = 0;
+          for (let i = 0; i < len; i++) s += ch[i] * ch[i];
+          this.sums[c] = (this.sums[c] || 0) + s;
+        }
+        this.n += len;
+        if (this.n >= this.target) {
+          const best = Math.max(...this.sums.slice(0, inp.length));
+          this.port.postMessage({ ms: best / this.n, dt: this.n / sampleRate });
+          this.sums = []; this.n = 0;
+        }
+        return true;
+      }
+    }
+    registerProcessor("mh-meter", Meter);`;
+
+  let ctx = null, stream = null, source = null, meter = null, currentLabel = "", useWorklet = false;
+  let restarting = false;
+
+  async function openStream() {
+    const audio = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    if (settings.device) audio.deviceId = { exact: settings.device };
+    try {
+      return await navigator.mediaDevices.getUserMedia({ audio });
+    } catch (e) {
+      if (settings.device && (e.name === "OverconstrainedError" || e.name === "NotFoundError")) {
+        settings.device = ""; store.set("device", "");
+        return navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+      }
+      throw e;
+    }
+  }
+
+  async function startAudio() {
+    if (!ctx) {
+      ctx = new AudioContext();
+      // AudioWorklet can't load from a blob: URL when the page is opened as a
+      // local file (file://), so fall back to ScriptProcessor there.
+      try {
+        const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
+        await ctx.audioWorklet.addModule(url);
+        useWorklet = true;
+      } catch { useWorklet = false; }
+    }
+    if (ctx.state === "suspended") await ctx.resume();
+    stopStream();
+    stream = await openStream();
+    const track = stream.getAudioTracks()[0];
+    const newLabel = track.label;
+    if (currentLabel && newLabel !== currentLabel) {
+      det.reset();
+      showNotice(`Mic switched to ${newLabel}. Re-learning your normal level.`);
+    }
+    currentLabel = newLabel;
+    track.addEventListener("ended", () => scheduleRestart());
+    track.addEventListener("mute", () => showNotice("The system interrupted the mic."));
+
+    source = ctx.createMediaStreamSource(stream);
+    if (useWorklet) {
+      meter = new AudioWorkletNode(ctx, "mh-meter", { numberOfInputs: 1, numberOfOutputs: 0 });
+      meter.port.onmessage = (e) => onFrame(e.data);
+      source.connect(meter);
+    } else {
+      const chans = Math.max(1, Math.min(source.channelCount || 1, 8));
+      meter = ctx.createScriptProcessor(4096, chans, 1);
+      meter.onaudioprocess = (e) => {
+        const ib = e.inputBuffer; let best = 0;
+        for (let c = 0; c < ib.numberOfChannels; c++) {
+          const d = ib.getChannelData(c); let s = 0;
+          for (let i = 0; i < d.length; i++) s += d[i] * d[i];
+          if (s > best) best = s;
+        }
+        onFrame({ ms: best / ib.length, dt: ib.length / ib.sampleRate });
+      };
+      source.connect(meter);
+      meter.connect(ctx.destination);  // outputs silence; needed for it to run
+    }
+    await refreshDevices();
+  }
+
+  function stopStream() {
+    try { source && source.disconnect(); } catch {}
+    if (meter) { if (meter.port) meter.port.onmessage = null; meter.onaudioprocess = null; try { meter.disconnect(); } catch {} }
+    if (stream) stream.getTracks().forEach((t) => t.stop());
+    stream = source = meter = null;
+  }
+
+  let restartTimer = null;
+  function scheduleRestart() {
+    clearTimeout(restartTimer);
+    restartTimer = setTimeout(async () => {
+      if (restarting) return;
+      restarting = true;
+      try { await startAudio(); } catch (e) { showNotice("Couldn't reopen the mic: " + e.message); }
+      restarting = false;
+    }, 500);
+  }
+
+  async function refreshDevices() {
+    const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications");
+    const sel = $("devSel");
+    sel.innerHTML = "";
+    sel.append(new Option("System default", ""));
+    devs.forEach((d, i) => sel.append(new Option(d.label || `Microphone ${i + 1}`, d.deviceId)));
+    sel.value = devs.some((d) => d.deviceId === settings.device) ? settings.device : "";
+  }
+
+  navigator.mediaDevices?.addEventListener("devicechange", async () => {
+    if (!stream) return;
+    // When following the system default, reopen so we pick up the new default mic.
+    if (!settings.device) scheduleRestart();
+    else await refreshDevices();
+  });
+
+  // ---------- per-frame ----------
+  let lastState = null, lastNotify = 0, lastBeep = 0;
+
+  function onFrame({ ms, dt }) {
+    const db = 10 * Math.log10(Math.max(ms, 1e-14));
+    det.process(db, dt);
+    let state = det.state;
+    if (state === "silent" && !settings.silent) state = det.baseline == null ? "calibrating" : "ok";
+
+    if (state !== lastState) {
+      onStateChange(state, lastState);
+      lastState = state;
+    }
+    renderWidget(state);
+    if (!document.hidden) drawGraph();
+  }
+
+  function onStateChange(state) {
+    const titles = { quiet: "🟠 Speak up · Mic Helper", silent: "🔴 No mic signal · Mic Helper" };
+    document.title = titles[state] || "Mic Helper";
+    setFavicon(state);
+    const now = Date.now();
+    if (state === "quiet") {
+      if (settings.notify && "Notification" in window && Notification.permission === "granted" && now - lastNotify > 30000) {
+        try { new Notification("You've gone quiet", { body: "Your mic level has dropped. Speak up or move closer.", tag: "mic-helper", silent: true }); } catch {}
+        lastNotify = now;
+      }
+      if (settings.beep && now - lastBeep > 20000) { beep(); lastBeep = now; }
+    }
+  }
+
+  const HEAD = {
+    calibrating: "Learning your normal level, just talk",
+    ok: "Sounding normal",
+    quiet: "You've gone quiet. Speak up",
+    silent: "No signal. Muted or unplugged?",
+  };
+
+  function pct(db) { return Math.min(Math.max((db + 70) / 70, 0), 1) * 100; }
+
+  function renderWidget(state) {
+    const w = $("widget");
+    if (w.dataset.state !== state) w.dataset.state = state;
+    const head = state === "quiet" && det.dropAmount != null
+      ? `${HEAD.quiet} (−${Math.round(det.dropAmount)} dB)` : HEAD[state];
+    if ($("wHead").textContent !== head) $("wHead").textContent = head;
+    $("wDb").textContent = `${Math.round(det.level)} dB`;
+    $("mFill").style.width = pct(det.level) + "%";
+    const showTicks = det.baseline != null;
+    $("mBase").style.display = $("mThr").style.display = showTicks ? "block" : "none";
+    if (showTicks) {
+      $("mBase").style.left = pct(det.baseline) + "%";
+      $("mThr").style.left = pct(det.baseline - det.dropDb) + "%";
+    }
+    $("stats").textContent = [
+      `Now ${Math.round(det.level)} dB`,
+      det.shortTerm != null ? `speaking ${Math.round(det.shortTerm)} dB` : null,
+      det.baseline != null ? `normal ${Math.round(det.baseline)} dB` : null,
+      currentLabel ? `mic: ${currentLabel}` : null,
+    ].filter(Boolean).join(" · ");
+  }
+
+  // ---------- graph ----------
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function drawGraph() {
+    const c = $("graph");
+    const dpr = window.devicePixelRatio || 1;
+    const W = c.clientWidth, H = c.clientHeight;
+    if (!W) return;
+    if (c.width !== W * dpr || c.height !== H * dpr) { c.width = W * dpr; c.height = H * dpr; }
+    const g = c.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    const y = (db) => H - (Math.min(Math.max(db, -70), 0) + 70) / 70 * H;
+    const n = det.historyLength, step = W / n, off = n - det.history.length;
+
+    g.fillStyle = cssVar("--bar");
+    det.history.forEach((s, i) => { const top = y(s.db); g.fillRect((i + off) * step, top, Math.max(step, 1), H - top); });
+
+    g.strokeStyle = cssVar("--accent"); g.lineWidth = 2; g.beginPath();
+    let drawing = false;
+    det.history.forEach((s, i) => {
+      if (s.speech == null) { drawing = false; return; }
+      const x = (i + off) * step, yy = y(s.speech);
+      drawing ? g.lineTo(x, yy) : g.moveTo(x, yy); drawing = true;
+    });
+    g.stroke();
+
+    if (det.baseline != null) {
+      const line = (db, color, dash) => { g.strokeStyle = color; g.lineWidth = 1; g.setLineDash(dash); g.beginPath(); g.moveTo(0, y(db)); g.lineTo(W, y(db)); g.stroke(); g.setLineDash([]); };
+      line(det.baseline, cssVar("--text"), [5, 4]);
+      line(det.baseline - det.dropDb, cssVar("--warn"), [2, 3]);
+    }
+  }
+
+  // ---------- favicon / beep / notices ----------
+  function setFavicon(state) {
+    const colors = { ok: cssVar("--ok"), calibrating: cssVar("--accent"), quiet: cssVar("--warn"), silent: cssVar("--bad") };
+    const cv = document.createElement("canvas"); cv.width = cv.height = 32;
+    const g = cv.getContext("2d");
+    g.fillStyle = colors[state] || "#888"; g.beginPath(); g.arc(16, 16, 13, 0, Math.PI * 2); g.fill();
+    $("favicon").href = cv.toDataURL();
+  }
+
+  function beep() {
+    if (!ctx) return;
+    const o = ctx.createOscillator(), gn = ctx.createGain();
+    o.frequency.value = 880; gn.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gn.gain.exponentialRampToValueAtTime(0.06, ctx.currentTime + 0.02);
+    gn.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    o.connect(gn).connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.2);
+  }
+
+  let noticeTimer;
+  function showNotice(text) { $("notice").textContent = text; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => ($("notice").textContent = ""), 6000); }
+
+  // ---------- pop-out mini window ----------
+  let miniWin = null;
+  async function popOut() {
+    if (miniWin && !miniWin.closed) { miniWin.focus(); return; }
+    let win;
+    if ("documentPictureInPicture" in window) {
+      win = await documentPictureInPicture.requestWindow({ width: 300, height: 84 });
+    } else {
+      win = window.open("", "mic-helper-mini", "popup,width=320,height=110");
+      if (!win) { showNotice("Your browser blocked the pop-up. Allow pop-ups for this page."); return; }
+      win.document.title = "Mic Helper";
+    }
+    miniWin = win;
+    const style = win.document.createElement("style");
+    style.textContent = document.querySelector("style").textContent;
+    win.document.head.append(style);
+    const theme = document.documentElement.dataset.theme;
+    if (theme) win.document.documentElement.dataset.theme = theme;
+    win.document.body.className = "mini";
+    win.document.body.append($("widget"));
+    $("popBtn").textContent = "Mini window is open";
+    const restore = () => {
+      if ($("widget").ownerDocument === win.document) $("widgetHome").append($("widget"));
+      $("popBtn").textContent = "Pop out mini window";
+      miniWin = null;
+    };
+    win.addEventListener("pagehide", restore);
+    win.addEventListener("beforeunload", restore);
+  }
+  if (!("documentPictureInPicture" in window)) {
+    $("popHint").textContent = "Opens a small window. Always-on-top needs Chrome or Edge. Keep this tab open.";
+  }
+
+  // ---------- wiring ----------
+  $("sensSel").value = String(settings.dropDb);
+  $("optSilent").checked = settings.silent;
+  $("optNotify").checked = settings.notify;
+  $("optBeep").checked = settings.beep;
+
+  $("startBtn").addEventListener("click", async () => {
+    $("startError").textContent = "";
+    if (!navigator.mediaDevices?.getUserMedia) {
+      $("startError").textContent = "This browser can't access the microphone from this page. Use the hosted https:// version, or open the file in Chrome or Edge.";
+      return;
+    }
+    try {
+      await startAudio();
+      $("startCard").classList.add("hidden");
+      $("app").classList.remove("hidden");
+      setFavicon("calibrating");
+    } catch (e) {
+      $("startError").textContent = e.name === "NotAllowedError"
+        ? "Microphone access was blocked. Allow it in the address bar's site settings and try again."
+        : "Couldn't start the mic: " + e.message;
+    }
+  });
+  $("popBtn").addEventListener("click", () => popOut().catch((e) => showNotice("Couldn't open the mini window: " + e.message)));
+  $("recalBtn").addEventListener("click", () => { det.reset(); showNotice("Re-learning your normal level. Just talk normally."); });
+  $("devSel").addEventListener("change", (e) => { settings.device = e.target.value; store.set("device", settings.device); det.reset(); scheduleRestart(); });
+  $("sensSel").addEventListener("change", (e) => { settings.dropDb = det.dropDb = Number(e.target.value); store.set("dropDb", settings.dropDb); });
+  $("optSilent").addEventListener("change", (e) => { settings.silent = e.target.checked; store.set("silent", settings.silent); });
+  $("optBeep").addEventListener("change", (e) => { settings.beep = e.target.checked; store.set("beep", settings.beep); if (settings.beep) beep(); });
+  $("optNotify").addEventListener("change", async (e) => {
+    settings.notify = e.target.checked;
+    if (settings.notify) {
+      if (!("Notification" in window)) { showNotice("Notifications aren't supported here."); e.target.checked = settings.notify = false; }
+      else if (Notification.permission !== "granted") {
+        const p = await Notification.requestPermission().catch(() => "denied");
+        if (p !== "granted") { showNotice("Notifications were blocked by the browser."); e.target.checked = settings.notify = false; }
+      }
+    }
+    store.set("notify", settings.notify);
+  });
+  window.addEventListener("resize", () => drawGraph());
+})();
+</script>
+</body>
+</html>
