@@ -56,6 +56,9 @@ a small level bar appears in the menu bar.
   ("Your voice level has dropped −11 dB") appears at the top of the screen. It goes
   away as soon as you're back to normal.
 - **Silent / muted**: the icon turns red and a red pill says the mic is picking up nothing.
+- **Drag the pill** to move it out of the way. It remembers where you put it; double-click
+  it (or use **Reset on-screen alert position**) to put it back. Hover and click **×** to
+  dismiss it: it stays hidden until that alert clears, and comes back next time.
 
 Click the icon for:
 
@@ -65,7 +68,7 @@ Click the icon for:
 - the current mic and a **macOS input volume slider**
 - **Lock input volume**: if any app changes it, it's put straight back
 - **Re-learn my normal level** (use after changing mic or seating position)
-- sensitivity (6 / 8 / 10 / 12 dB drop), on-screen alert, silent alert, sound, open at login
+- sensitivity (6 / 8 / 10 / 12 dB drop), on-screen alert (and resetting its position), silent alert, sound, open at login
 - **Expert** → **Diagnostics** (⌘D) and **Show likely cause in alerts**
 
 ### History window

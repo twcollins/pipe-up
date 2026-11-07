@@ -73,6 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var lastSound = Date.distantPast
     private var hudShowsAlert = false
     private var lastHudText = ""
+    /// The alert the user dismissed with ×; it stays hidden until the state changes.
+    private var dismissedAlert: LevelDetector.State?
     private var menuOpen = false
 
     // MARK: Settings
@@ -95,6 +97,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         migrateSettingsFromMicHelper()
         detector.dropDb = dropDb
         graph.detector = detector
+        hud.onDismiss = { [weak self] in
+            guard let self, self.hudShowsAlert else { return }
+            self.dismissedAlert = self.effectiveState
+            self.hudShowsAlert = false
+            self.lastHudText = ""
+        }
         graph.onClick = { [weak self] in
             self?.menu.cancelTracking()
             self?.showHistory()
@@ -381,13 +389,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateAlertHUD(_ state: LevelDetector.State) {
         var text: String?
         var color = NSColor.systemOrange
+        if let d = dismissedAlert, d != state { dismissedAlert = nil }
         switch state {
-        case .quiet where showHUD:
+        case .quiet where showHUD && dismissedAlert != .quiet:
             let drop = Int((detector.dropAmount ?? dropDb).rounded())
             var t = "Your voice level has dropped  (−\(drop) dB)"
             if showCause, let cause = currentDiagnosis?.likely { t += "  ·  likely: \(cause)" }
             text = t
-        case .silent where showHUD && alertSilent:
+        case .silent where showHUD && alertSilent && dismissedAlert != .silent:
             text = muted ? "Mic is muted in macOS" : "Mic is picking up nothing — muted or disconnected?"
             color = .systemRed
         default:
@@ -539,6 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         hudItem = item("Show on-screen alert", #selector(toggleHUD))
         hudItem.state = showHUD ? .on : .off
+        _ = item("Reset on-screen alert position", #selector(resetHUDPosition))
         silentItem = item("Alert when the mic goes silent", #selector(toggleSilent))
         silentItem.state = alertSilent ? .on : .off
         soundItem = item("Play a sound when my level drops", #selector(toggleSound))
@@ -631,6 +641,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hudItem.state = showHUD ? .on : .off
         if !showHUD { hud.hide(); hudShowsAlert = false }
     }
+
+    @objc private func resetHUDPosition() { hud.resetPosition() }
 
     @objc private func toggleSilent() {
         defaults.set(!alertSilent, forKey: "alertSilent")
