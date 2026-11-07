@@ -10,6 +10,10 @@ final class HUD {
     private let closeButton = NSButton()
     private var hideWork: DispatchWorkItem?
     private(set) var isVisible = false
+    private var shownAt = Date.distantPast
+
+    /// Once shown, the pill stays up at least this long, even if the alert clears sooner.
+    var minimumVisible: TimeInterval = 5
 
     /// Called when the user clicks × (not when the pill hides on its own).
     var onDismiss: (() -> Void)?
@@ -84,20 +88,29 @@ final class HUD {
         } else {
             panel.setFrame(frame(width: width, on: currentScreen()), display: true)
             isVisible = true
+            shownAt = Date()
             closeButton.alphaValue = box.isMouseInside ? 1 : 0
             panel.orderFrontRegardless()
             NSAnimationContext.runAnimationGroup { $0.duration = 0.2; panel.animator().alphaValue = 1 }
         }
         if let duration {
-            let work = DispatchWorkItem { [weak self] in self?.hide() }
+            let work = DispatchWorkItem { [weak self] in self?.hide(immediately: true) }
             hideWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
         }
     }
 
-    func hide() {
+    /// Hide the pill. Unless `immediately`, it first stays up for the rest of `minimumVisible`.
+    func hide(immediately: Bool = false) {
         hideWork?.cancel()
         guard isVisible else { return }
+        let remaining = minimumVisible - Date().timeIntervalSince(shownAt)
+        if !immediately, remaining > 0 {
+            let work = DispatchWorkItem { [weak self] in self?.hide(immediately: true) }
+            hideWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
+            return
+        }
         isVisible = false
         NSAnimationContext.runAnimationGroup({ $0.duration = 0.4; panel.animator().alphaValue = 0 },
                                              completionHandler: { [weak self] in
@@ -117,7 +130,7 @@ final class HUD {
     }
 
     @objc private func dismissClicked() {
-        hide()
+        hide(immediately: true)
         onDismiss?()
     }
 

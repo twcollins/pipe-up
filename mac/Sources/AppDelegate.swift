@@ -56,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var loginItem: NSMenuItem!
     private var privacyItem: NSMenuItem!
     private var sensitivityItems: [NSMenuItem] = []
+    private var hudTimeItems: [NSMenuItem] = []
 
     private var device: AudioDeviceID?
     private var deviceName = "—"
@@ -83,6 +84,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         get { defaults.object(forKey: "dropDb") as? Double ?? 8 }
         set { defaults.set(newValue, forKey: "dropDb"); detector.dropDb = newValue }
     }
+    /// Minimum seconds the on-screen alert stays up once shown.
+    private var hudMinSeconds: Double {
+        get { defaults.object(forKey: "hudMinSeconds") as? Double ?? 5 }
+        set { defaults.set(newValue, forKey: "hudMinSeconds"); hud.minimumVisible = newValue }
+    }
     private func flag(_ key: String, default def: Bool) -> Bool { defaults.object(forKey: key) as? Bool ?? def }
     private var showHUD: Bool { flag("showHUD", default: true) }
     private var alertSilent: Bool { flag("alertSilent", default: true) }
@@ -97,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         migrateSettingsFromMicHelper()
         detector.dropDb = dropDb
         graph.detector = detector
+        hud.minimumVisible = hudMinSeconds
         hud.onDismiss = { [weak self] in
             guard let self, self.hudShowsAlert else { return }
             self.dismissedAlert = self.effectiveState
@@ -416,7 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Brief informational message (device switched, volume changed…).
     private func notice(_ text: String) {
         guard showHUD, !hudShowsAlert else { return }
-        hud.show(text, color: .systemBlue, duration: 4)
+        hud.show(text, color: .systemBlue, duration: 6)
     }
 
     // MARK: UI
@@ -548,6 +555,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         hudItem = item("Show on-screen alert", #selector(toggleHUD))
         hudItem.state = showHUD ? .on : .off
+        let hudTime = NSMenuItem(title: "Keep on-screen alert up for at least", action: nil, keyEquivalent: "")
+        let hudTimeMenu = NSMenu()
+        for (secs, label) in [(0.0, "No minimum"), (2.0, "2 seconds"), (5.0, "5 seconds (default)"), (10.0, "10 seconds"), (20.0, "20 seconds")] {
+            let it = NSMenuItem(title: label, action: #selector(setHudTime(_:)), keyEquivalent: "")
+            it.target = self
+            it.representedObject = secs
+            it.state = secs == hudMinSeconds ? .on : .off
+            hudTimeMenu.addItem(it)
+            hudTimeItems.append(it)
+        }
+        hudTime.submenu = hudTimeMenu
+        menu.addItem(hudTime)
         _ = item("Reset on-screen alert position", #selector(resetHUDPosition))
         silentItem = item("Alert when the mic goes silent", #selector(toggleSilent))
         silentItem.state = alertSilent ? .on : .off
@@ -639,7 +658,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleHUD() {
         defaults.set(!showHUD, forKey: "showHUD")
         hudItem.state = showHUD ? .on : .off
-        if !showHUD { hud.hide(); hudShowsAlert = false }
+        if !showHUD { hud.hide(immediately: true); hudShowsAlert = false }
+    }
+
+    @objc private func setHudTime(_ sender: NSMenuItem) {
+        guard let secs = sender.representedObject as? Double else { return }
+        hudMinSeconds = secs
+        hudTimeItems.forEach { $0.state = ($0.representedObject as? Double) == secs ? .on : .off }
     }
 
     @objc private func resetHUDPosition() { hud.resetPosition() }

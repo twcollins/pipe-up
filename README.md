@@ -68,7 +68,7 @@ Click the icon for:
 - the current mic and a **macOS input volume slider**
 - **Lock input volume**: if any app changes it, it's put straight back
 - **Re-learn my normal level** (use after changing mic or seating position)
-- sensitivity (6 / 8 / 10 / 12 dB drop), on-screen alert (and resetting its position), silent alert, sound, open at login
+- sensitivity (6 / 8 / 10 / 12 dB drop), on-screen alert (how long it stays up at least — default 5 s — and resetting its position), silent alert, sound, open at login
 - **Expert** → **Diagnostics** (⌘D) and **Show likely cause in alerts**
 
 ### History window
